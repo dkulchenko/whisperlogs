@@ -35,26 +35,25 @@ defmodule WhisperLogsWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <div class="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
-      <header class="flex-shrink-0 border-b border-zinc-800 bg-zinc-900">
-        <div class="px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
-          <div class="flex items-center gap-6">
-            <a href="/" class="flex items-center gap-2 text-zinc-100 hover:text-white">
-              <.icon name="hero-document-text" class="size-6 text-blue-400" />
-              <span class="font-semibold">WhisperLogs</span>
+    <div class="h-screen bg-bg-base text-text-primary flex flex-col overflow-hidden">
+      <header class="flex-shrink-0 border-b border-border-default bg-bg-elevated">
+        <div class="px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between">
+          <div class="flex items-center gap-4">
+            <a href="/" class="text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight">
+              WhisperLogs
             </a>
 
             <%= if @current_scope do %>
-              <nav class="flex items-center gap-1">
+              <nav class="flex items-center gap-0.5">
                 <.link
                   navigate={~p"/"}
-                  class="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                  class="px-2 py-1 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Logs
                 </.link>
                 <.link
                   navigate={~p"/api-keys"}
-                  class="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                  class="px-2 py-1 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   API Keys
                 </.link>
@@ -62,20 +61,20 @@ defmodule WhisperLogsWeb.Layouts do
             <% end %>
           </div>
 
-          <div class="flex items-center gap-4">
+          <div class="flex items-center gap-3">
             <%= if @current_scope do %>
-              <span class="text-sm text-zinc-500">{@current_scope.user.email}</span>
+              <span class="text-xs text-text-tertiary">{@current_scope.user.email}</span>
               <.link
                 href={~p"/users/log-out"}
                 method="delete"
-                class="text-sm text-zinc-400 hover:text-zinc-100"
+                class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
               >
                 Log out
               </.link>
             <% else %>
               <.link
                 navigate={~p"/users/log-in"}
-                class="text-sm text-zinc-400 hover:text-zinc-100"
+                class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
               >
                 Log in
               </.link>
@@ -84,7 +83,7 @@ defmodule WhisperLogsWeb.Layouts do
         </div>
       </header>
 
-      <main class="flex-1 flex flex-col">
+      <main class="flex-1 flex flex-col min-h-0">
         {render_slot(@inner_block)}
       </main>
 
@@ -136,40 +135,4 @@ defmodule WhisperLogsWeb.Layouts do
     """
   end
 
-  @doc """
-  Provides dark vs light theme toggle based on themes defined in app.css.
-
-  See <head> in root.html.heex which applies the theme before page load.
-  """
-  def theme_toggle(assigns) do
-    ~H"""
-    <div class="card relative flex flex-row items-center border-2 border-base-300 bg-base-300 rounded-full">
-      <div class="absolute w-1/3 h-full rounded-full border-1 border-base-200 bg-base-100 brightness-200 left-0 [[data-theme=light]_&]:left-1/3 [[data-theme=dark]_&]:left-2/3 transition-[left]" />
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="system"
-      >
-        <.icon name="hero-computer-desktop-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="light"
-      >
-        <.icon name="hero-sun-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-
-      <button
-        class="flex p-2 cursor-pointer w-1/3"
-        phx-click={JS.dispatch("phx:set-theme")}
-        data-phx-theme="dark"
-      >
-        <.icon name="hero-moon-micro" class="size-4 opacity-75 hover:opacity-100" />
-      </button>
-    </div>
-    """
-  end
 end

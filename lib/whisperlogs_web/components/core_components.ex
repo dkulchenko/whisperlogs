@@ -59,19 +59,18 @@ defmodule WhisperLogsWeb.CoreComponents do
       {@rest}
     >
       <div class={[
-        "alert w-80 sm:w-96 max-w-80 sm:max-w-96 text-wrap",
-        @kind == :info && "alert-info",
-        @kind == :error && "alert-error"
+        "flex items-start gap-3 w-80 sm:w-96 max-w-80 sm:max-w-96 p-4 rounded-lg border shadow-lg text-wrap",
+        @kind == :info && "bg-bg-elevated border-border-default text-text-primary",
+        @kind == :error && "bg-bg-elevated border-error/50 text-text-primary"
       ]}>
-        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0" />
-        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0" />
-        <div>
+        <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0 text-info" />
+        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0 text-error" />
+        <div class="flex-1 text-sm">
           <p :if={@title} class="font-semibold">{@title}</p>
-          <p>{msg}</p>
+          <p class="text-text-secondary">{msg}</p>
         </div>
-        <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label="close">
-          <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
+        <button type="button" class="group shrink-0 cursor-pointer" aria-label="close">
+          <.icon name="hero-x-mark" class="size-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
         </button>
       </div>
     </div>
@@ -89,15 +88,22 @@ defmodule WhisperLogsWeb.CoreComponents do
   """
   attr :rest, :global, include: ~w(href navigate patch method download name value disabled)
   attr :class, :any
-  attr :variant, :string, values: ~w(primary)
+  attr :variant, :string, values: ~w(primary ghost default), default: "default"
   slot :inner_block, required: true
 
   def button(%{rest: rest} = assigns) do
-    variants = %{"primary" => "btn-primary", nil => "btn-primary btn-soft"}
+    variants = %{
+      "primary" => "bg-accent-purple hover:bg-accent-purple-hover text-white font-medium",
+      "ghost" => "bg-transparent hover:bg-bg-surface text-text-secondary hover:text-text-primary",
+      "default" => "bg-bg-surface hover:bg-bg-muted text-text-primary font-medium border border-border-default"
+    }
 
     assigns =
       assign_new(assigns, :class, fn ->
-        ["btn", Map.fetch!(variants, assigns[:variant])]
+        [
+          "inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed",
+          Map.fetch!(variants, assigns[:variant])
+        ]
       end)
 
     if rest[:href] || rest[:navigate] || rest[:patch] do
@@ -204,8 +210,8 @@ defmodule WhisperLogsWeb.CoreComponents do
       end)
 
     ~H"""
-    <div class="fieldset mb-2">
-      <label>
+    <div class="fieldset mb-3">
+      <label class="flex items-center gap-2 cursor-pointer">
         <input
           type="hidden"
           name={@name}
@@ -213,17 +219,16 @@ defmodule WhisperLogsWeb.CoreComponents do
           disabled={@rest[:disabled]}
           form={@rest[:form]}
         />
-        <span class="label">
-          <input
-            type="checkbox"
-            id={@id}
-            name={@name}
-            value="true"
-            checked={@checked}
-            class={@class || "checkbox checkbox-sm"}
-            {@rest}
-          />{@label}
-        </span>
+        <input
+          type="checkbox"
+          id={@id}
+          name={@name}
+          value="true"
+          checked={@checked}
+          class={@class || "checkbox checkbox-sm border-border-default checked:bg-accent-purple checked:border-accent-purple"}
+          {@rest}
+        />
+        <span class="text-sm text-text-secondary">{@label}</span>
       </label>
       <.error :for={msg <- @errors}>{msg}</.error>
     </div>
@@ -232,13 +237,13 @@ defmodule WhisperLogsWeb.CoreComponents do
 
   def input(%{type: "select"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
         <select
           id={@id}
           name={@name}
-          class={[@class || "w-full select", @errors != [] && (@error_class || "select-error")]}
+          class={[@class || "w-full select bg-bg-surface border-border-default text-text-primary focus:outline-none focus:border-text-tertiary", @errors != [] && (@error_class || "select-error border-error")]}
           multiple={@multiple}
           {@rest}
         >
@@ -253,15 +258,15 @@ defmodule WhisperLogsWeb.CoreComponents do
 
   def input(%{type: "textarea"} = assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
         <textarea
           id={@id}
           name={@name}
           class={[
-            @class || "w-full textarea",
-            @errors != [] && (@error_class || "textarea-error")
+            @class || "w-full textarea bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
+            @errors != [] && (@error_class || "textarea-error border-error")
           ]}
           {@rest}
         >{Phoenix.HTML.Form.normalize_value("textarea", @value)}</textarea>
@@ -274,17 +279,17 @@ defmodule WhisperLogsWeb.CoreComponents do
   # All other inputs text, datetime-local, url, password, etc. are handled here...
   def input(assigns) do
     ~H"""
-    <div class="fieldset mb-2">
+    <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
           class={[
-            @class || "w-full input",
-            @errors != [] && (@error_class || "input-error")
+            @class || "w-full input bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
+            @errors != [] && (@error_class || "input-error border-error")
           ]}
           {@rest}
         />
@@ -315,10 +320,10 @@ defmodule WhisperLogsWeb.CoreComponents do
     ~H"""
     <header class={[@actions != [] && "flex items-center justify-between gap-6", "pb-4"]}>
       <div>
-        <h1 class="text-lg font-semibold leading-8">
+        <h1 class="text-xl font-semibold leading-8 text-text-primary">
           {render_slot(@inner_block)}
         </h1>
-        <p :if={@subtitle != []} class="text-sm text-base-content/70">
+        <p :if={@subtitle != []} class="mt-1 text-sm text-text-secondary">
           {render_slot(@subtitle)}
         </p>
       </div>

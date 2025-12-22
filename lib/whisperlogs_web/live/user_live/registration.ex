@@ -8,13 +8,13 @@ defmodule WhisperLogsWeb.UserLive.Registration do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm">
+      <div class="mx-auto max-w-sm py-12 space-y-6">
         <div class="text-center">
           <.header>
             Register for an account
             <:subtitle>
               Already registered?
-              <.link navigate={~p"/users/log-in"} class="font-semibold text-brand hover:underline">
+              <.link navigate={~p"/users/log-in"} class="font-semibold text-accent-purple hover:underline">
                 Log in
               </.link>
               to your account now.
@@ -22,20 +22,22 @@ defmodule WhisperLogsWeb.UserLive.Registration do
           </.header>
         </div>
 
-        <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
-          <.input
-            field={@form[:email]}
-            type="email"
-            label="Email"
-            autocomplete="username"
-            required
-            phx-mounted={JS.focus()}
-          />
+        <div class="bg-bg-elevated border border-border-default rounded-lg p-6">
+          <.form for={@form} id="registration_form" phx-submit="save" phx-change="validate">
+            <.input
+              field={@form[:email]}
+              type="email"
+              label="Email"
+              autocomplete="username"
+              required
+              phx-mounted={JS.focus()}
+            />
 
-          <.button phx-disable-with="Creating account..." class="btn btn-primary w-full">
-            Create an account
-          </.button>
-        </.form>
+            <.button variant="primary" phx-disable-with="Creating account..." class="w-full">
+              Create an account
+            </.button>
+          </.form>
+        </div>
       </div>
     </Layouts.app>
     """

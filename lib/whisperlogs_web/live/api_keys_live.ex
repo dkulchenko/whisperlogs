@@ -20,7 +20,7 @@ defmodule WhisperLogsWeb.ApiKeysLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="max-w-4xl mx-auto p-6">
+      <div class="max-w-4xl mx-auto px-6 py-8">
         <.header>
           API Keys
           <:subtitle>
@@ -28,8 +28,8 @@ defmodule WhisperLogsWeb.ApiKeysLive do
           </:subtitle>
         </.header>
 
-        <div class="mt-8 bg-zinc-900 rounded-lg p-6">
-          <h3 class="text-lg font-medium text-zinc-100 mb-4">Create New API Key</h3>
+        <div class="mt-8 bg-bg-elevated border border-border-default rounded-lg p-6">
+          <h3 class="text-lg font-semibold text-text-primary mb-4">Create New API Key</h3>
           <.form for={@form} id="api-key-form" phx-submit="create" class="space-y-4">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <.input
@@ -45,41 +45,43 @@ defmodule WhisperLogsWeb.ApiKeysLive do
                 placeholder="e.g., my-app-prod"
               />
             </div>
-            <p class="text-sm text-zinc-400">
+            <p class="text-sm text-text-tertiary">
               Source must be lowercase letters, numbers, hyphens, and underscores only.
             </p>
-            <.button phx-disable-with="Creating...">Create API Key</.button>
+            <.button variant="primary" phx-disable-with="Creating...">Create API Key</.button>
           </.form>
         </div>
 
         <div class="mt-8">
-          <h3 class="text-lg font-medium text-zinc-100 mb-4">Your API Keys</h3>
+          <h3 class="text-lg font-semibold text-text-primary mb-4">Your API Keys</h3>
 
           <div class="space-y-3">
             <%= if @api_keys == [] do %>
-              <div class="text-zinc-500 py-8 text-center">
-                No API keys yet. Create one above to start ingesting logs.
+              <div class="flex flex-col items-center justify-center py-12 text-text-tertiary">
+                <.icon name="hero-key" class="size-10 mb-3 opacity-50" />
+                <p class="text-text-secondary font-medium">No API keys yet</p>
+                <p class="mt-1 text-sm">Create one above to start ingesting logs.</p>
               </div>
             <% end %>
             <div
               :for={api_key <- @api_keys}
               id={"api-key-row-#{api_key.id}"}
-              class="bg-zinc-900 rounded-lg p-4"
+              class="bg-bg-elevated border border-border-default rounded-lg p-4 hover:border-border-subtle transition-colors"
             >
               <div class="flex items-center justify-between">
                 <div class="flex-1">
                   <div class="flex items-center gap-3">
-                    <span class="font-medium text-zinc-100">{api_key.name}</span>
-                    <span class="px-2 py-0.5 bg-zinc-800 rounded text-xs text-zinc-400 font-mono">
+                    <span class="font-medium text-text-primary">{api_key.name}</span>
+                    <span class="px-2 py-0.5 bg-bg-surface border border-border-default rounded text-xs text-text-secondary font-mono">
                       {api_key.source}
                     </span>
                   </div>
-                  <div class="mt-1 flex items-center gap-4 text-sm text-zinc-500">
+                  <div class="mt-1.5 flex items-center gap-4 text-sm text-text-tertiary">
                     <span>Created {Calendar.strftime(api_key.inserted_at, "%b %d, %Y")}</span>
                     <%= if api_key.last_used_at do %>
                       <span>Last used {Calendar.strftime(api_key.last_used_at, "%b %d, %Y")}</span>
                     <% else %>
-                      <span>Never used</span>
+                      <span class="text-text-tertiary/60">Never used</span>
                     <% end %>
                   </div>
                 </div>
@@ -88,7 +90,7 @@ defmodule WhisperLogsWeb.ApiKeysLive do
                     type="button"
                     phx-click="toggle_reveal"
                     phx-value-id={api_key.id}
-                    class="px-3 py-1.5 text-sm text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 rounded transition-colors"
+                    class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
                   >
                     {if @revealed_key_id == api_key.id, do: "Hide", else: "Reveal"}
                   </button>
@@ -97,17 +99,17 @@ defmodule WhisperLogsWeb.ApiKeysLive do
                     phx-click="revoke"
                     phx-value-id={api_key.id}
                     data-confirm="Are you sure you want to revoke this API key? This cannot be undone."
-                    class="px-3 py-1.5 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/30 rounded transition-colors"
+                    class="px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
                   >
                     Revoke
                   </button>
                 </div>
               </div>
               <%= if @revealed_key_id == api_key.id do %>
-                <div class="mt-3 flex items-center gap-2">
+                <div class="mt-4 flex items-center gap-2">
                   <code
                     id={"api-key-#{api_key.id}"}
-                    class="flex-1 bg-zinc-800 px-4 py-2 rounded font-mono text-sm text-zinc-100 select-all"
+                    class="flex-1 bg-bg-base border border-border-default px-4 py-2.5 rounded-lg font-mono text-sm text-text-primary select-all"
                   >
                     {api_key.key}
                   </code>
@@ -116,7 +118,7 @@ defmodule WhisperLogsWeb.ApiKeysLive do
                     phx-hook="CopyToClipboard"
                     id={"copy-key-#{api_key.id}"}
                     data-copy-target={"api-key-#{api_key.id}"}
-                    class="px-3 py-2 bg-zinc-700 hover:bg-zinc-600 rounded text-sm font-medium transition-colors"
+                    class="px-4 py-2.5 bg-bg-surface hover:bg-bg-muted border border-border-default rounded-lg text-sm font-medium text-text-primary transition-colors"
                   >
                     Copy
                   </button>
