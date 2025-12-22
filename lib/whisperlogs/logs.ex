@@ -1,0 +1,173 @@
+defmodule WhisperLogs.Logs do
+  @moduledoc """
+  The Logs context for managing log entries.
+  """
+
+  import Ecto.Query, warn: false
+  alias WhisperLogs.Repo
+  alias WhisperLogs.Logs.Log
+
+  @pubsub WhisperLogs.PubSub
+  @topic "logs"
+
+  @doc """
+  Inserts a batch of logs for a given source.
+
+  Returns `{count, nil}` where count is the number of inserted logs.
+  """
+  def insert_batch(source, logs) when is_binary(source) and is_list(logs) do
+    now = DateTime.utc_now()
+
+    entries =
+      Enum.map(logs, fn log ->
+        %{
+          timestamp: parse_timestamp(log["timestamp"]) || now,
+          level: normalize_level(log["level"]),
+          message: log["message"] || "",
+          metadata: log["metadata"] || %{},
+          request_id: log["request_id"],
+          source: source,
+          inserted_at: now
+        }
+      end)
+
+    {count, inserted} =
+      Repo.insert_all(Log, entries,
+        returning: [
+          :id,
+          :timestamp,
+          :level,
+          :message,
+          :metadata,
+          :request_id,
+          :source,
+          :inserted_at
+        ]
+      )
+
+    # Broadcast each log for real-time updates
+    Enum.each(inserted, fn log ->
+      broadcast({:new_log, log})
+    end)
+
+    {count, nil}
+  end
+
+  @doc """
+  Lists logs with optional filters.
+
+  ## Options
+
+    * `:from` - Start of time range (DateTime)
+    * `:to` - End of time range (DateTime)
+    * `:levels` - List of levels to include
+    * `:sources` - List of sources to include
+    * `:search` - Text search on message (ILIKE)
+    * `:request_id` - Exact match on request_id
+    * `:limit` - Max number of logs to return (default: 100)
+
+  """
+  def list_logs(opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+
+    Log
+    |> order_by([l], desc: l.timestamp)
+    |> apply_filters(opts)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  defp apply_filters(query, opts) do
+    query
+    |> filter_time_range(Keyword.get(opts, :from), Keyword.get(opts, :to))
+    |> filter_levels(Keyword.get(opts, :levels))
+    |> filter_sources(Keyword.get(opts, :sources))
+    |> filter_search(Keyword.get(opts, :search))
+    |> filter_request_id(Keyword.get(opts, :request_id))
+  end
+
+  defp filter_time_range(query, nil, nil), do: query
+  defp filter_time_range(query, from, nil), do: where(query, [l], l.timestamp >= ^from)
+  defp filter_time_range(query, nil, to), do: where(query, [l], l.timestamp <= ^to)
+
+  defp filter_time_range(query, from, to),
+    do: where(query, [l], l.timestamp >= ^from and l.timestamp <= ^to)
+
+  defp filter_levels(query, nil), do: query
+  defp filter_levels(query, []), do: where(query, false)
+  defp filter_levels(query, levels), do: where(query, [l], l.level in ^levels)
+
+  defp filter_sources(query, nil), do: query
+  defp filter_sources(query, []), do: query
+  defp filter_sources(query, sources), do: where(query, [l], l.source in ^sources)
+
+  defp filter_search(query, nil), do: query
+  defp filter_search(query, ""), do: query
+
+  defp filter_search(query, search) do
+    search_term = "%#{search}%"
+    where(query, [l], ilike(l.message, ^search_term))
+  end
+
+  defp filter_request_id(query, nil), do: query
+  defp filter_request_id(query, ""), do: query
+  defp filter_request_id(query, request_id), do: where(query, [l], l.request_id == ^request_id)
+
+  @doc """
+  Gets a single log by ID.
+  """
+  def get_log(id) do
+    Repo.get(Log, id)
+  end
+
+  @doc """
+  Returns a list of distinct sources.
+  """
+  def list_sources do
+    Log
+    |> select([l], l.source)
+    |> distinct(true)
+    |> order_by([l], asc: l.source)
+    |> Repo.all()
+  end
+
+  @doc """
+  Deletes logs older than the given datetime.
+
+  Returns `{count, nil}` where count is the number of deleted logs.
+  """
+  def delete_before(%DateTime{} = cutoff) do
+    Log
+    |> where([l], l.timestamp < ^cutoff)
+    |> Repo.delete_all()
+  end
+
+  @doc """
+  Subscribes to new log events.
+  """
+  def subscribe do
+    Phoenix.PubSub.subscribe(@pubsub, @topic)
+  end
+
+  @doc """
+  Broadcasts a log event to subscribers.
+  """
+  def broadcast(message) do
+    Phoenix.PubSub.broadcast(@pubsub, @topic, message)
+  end
+
+  defp parse_timestamp(nil), do: nil
+
+  defp parse_timestamp(ts) when is_binary(ts) do
+    case DateTime.from_iso8601(ts) do
+      {:ok, dt, _offset} -> dt
+      _ -> nil
+    end
+  end
+
+  defp parse_timestamp(_), do: nil
+
+  defp normalize_level(level) when level in ~w(debug info warning error), do: level
+  defp normalize_level("warn"), do: "warning"
+  defp normalize_level(_), do: "info"
+end

@@ -35,40 +35,61 @@ defmodule WhisperLogsWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <header class="navbar px-4 sm:px-6 lg:px-8">
-      <div class="flex-1">
-        <a href="/" class="flex-1 flex w-fit items-center gap-2">
-          <img src={~p"/images/logo.svg"} width="36" />
-          <span class="text-sm font-semibold">v{Application.spec(:phoenix, :vsn)}</span>
-        </a>
-      </div>
-      <div class="flex-none">
-        <ul class="flex flex-column px-1 space-x-4 items-center">
-          <li>
-            <a href="https://phoenixframework.org/" class="btn btn-ghost">Website</a>
-          </li>
-          <li>
-            <a href="https://github.com/phoenixframework/phoenix" class="btn btn-ghost">GitHub</a>
-          </li>
-          <li>
-            <.theme_toggle />
-          </li>
-          <li>
-            <a href="https://hexdocs.pm/phoenix/overview.html" class="btn btn-primary">
-              Get Started <span aria-hidden="true">&rarr;</span>
+    <div class="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col">
+      <header class="flex-shrink-0 border-b border-zinc-800 bg-zinc-900">
+        <div class="px-4 sm:px-6 lg:px-8 h-14 flex items-center justify-between">
+          <div class="flex items-center gap-6">
+            <a href="/" class="flex items-center gap-2 text-zinc-100 hover:text-white">
+              <.icon name="hero-document-text" class="size-6 text-blue-400" />
+              <span class="font-semibold">WhisperLogs</span>
             </a>
-          </li>
-        </ul>
-      </div>
-    </header>
 
-    <main class="px-4 py-20 sm:px-6 lg:px-8">
-      <div class="mx-auto max-w-2xl space-y-4">
+            <%= if @current_scope do %>
+              <nav class="flex items-center gap-1">
+                <.link
+                  navigate={~p"/"}
+                  class="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  Logs
+                </.link>
+                <.link
+                  navigate={~p"/api-keys"}
+                  class="px-3 py-1.5 rounded text-sm text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
+                >
+                  API Keys
+                </.link>
+              </nav>
+            <% end %>
+          </div>
+
+          <div class="flex items-center gap-4">
+            <%= if @current_scope do %>
+              <span class="text-sm text-zinc-500">{@current_scope.user.email}</span>
+              <.link
+                href={~p"/users/log-out"}
+                method="delete"
+                class="text-sm text-zinc-400 hover:text-zinc-100"
+              >
+                Log out
+              </.link>
+            <% else %>
+              <.link
+                navigate={~p"/users/log-in"}
+                class="text-sm text-zinc-400 hover:text-zinc-100"
+              >
+                Log in
+              </.link>
+            <% end %>
+          </div>
+        </div>
+      </header>
+
+      <main class="flex-1 flex flex-col">
         {render_slot(@inner_block)}
-      </div>
-    </main>
+      </main>
 
-    <.flash_group flash={@flash} />
+      <.flash_group flash={@flash} />
+    </div>
     """
   end
 

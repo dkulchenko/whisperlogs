@@ -26,10 +26,59 @@ import {hooks as colocatedHooks} from "phoenix-colocated/whisperlogs"
 import topbar from "../vendor/topbar"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
+
+const Hooks = {
+  CopyToClipboard: {
+    mounted() {
+      this.el.addEventListener("click", () => {
+        const targetId = this.el.dataset.copyTarget
+        const target = document.getElementById(targetId)
+        if (target) {
+          const text = target.textContent.trim()
+          this.copyToClipboard(text)
+        }
+      })
+    },
+    copyToClipboard(text) {
+      const originalText = this.el.textContent
+      const showSuccess = () => {
+        this.el.textContent = "Copied!"
+        setTimeout(() => { this.el.textContent = originalText }, 2000)
+      }
+      const showError = () => {
+        this.el.textContent = "Failed"
+        setTimeout(() => { this.el.textContent = originalText }, 2000)
+      }
+
+      // Try modern clipboard API first
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(showSuccess).catch(showError)
+      } else {
+        // Fallback for insecure contexts
+        const textArea = document.createElement("textarea")
+        textArea.value = text
+        textArea.style.position = "fixed"
+        textArea.style.left = "-999999px"
+        textArea.style.top = "-999999px"
+        document.body.appendChild(textArea)
+        textArea.focus()
+        textArea.select()
+        try {
+          document.execCommand("copy")
+          showSuccess()
+        } catch (err) {
+          showError()
+        }
+        textArea.remove()
+      }
+    }
+  }
+}
+
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ...Hooks},
 })
 
 // Show progress bar on live navigation and form submits

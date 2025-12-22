@@ -12,8 +12,8 @@ defmodule WhisperLogs.Application do
       WhisperLogs.Repo,
       {DNSCluster, query: Application.get_env(:whisperlogs, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
-      # Start a worker by calling: WhisperLogs.Worker.start_link(arg)
-      # {WhisperLogs.Worker, arg},
+      # Log retention cleanup
+      WhisperLogs.Retention,
       # Start to serve requests, typically the last entry
       WhisperLogsWeb.Endpoint
     ]

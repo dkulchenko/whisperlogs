@@ -4,7 +4,8 @@ import Config
 config :whisperlogs, WhisperLogs.Repo,
   username: "postgres",
   password: "postgres",
-  hostname: "localhost",
+  hostname: "127.0.0.1",
+  port: 5432,
   database: "whisperlogs_dev",
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
@@ -17,9 +18,7 @@ config :whisperlogs, WhisperLogs.Repo,
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
 config :whisperlogs, WhisperLogsWeb.Endpoint,
-  # Binding to loopback ipv4 address prevents access from other machines.
-  # Change to `ip: {0, 0, 0, 0}` to allow access from other machines.
-  http: [ip: {127, 0, 0, 1}],
+  http: [ip: {0, 0, 0, 0}, port: 4050],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
