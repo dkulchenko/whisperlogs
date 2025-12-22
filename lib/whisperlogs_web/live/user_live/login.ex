@@ -25,12 +25,18 @@ defmodule WhisperLogsWeb.UserLive.Login do
           </.header>
         </div>
 
-        <div :if={local_mail_adapter?()} class="flex items-start gap-3 p-4 bg-bg-elevated border border-border-default rounded-lg text-sm">
+        <div
+          :if={local_mail_adapter?()}
+          class="flex items-start gap-3 p-4 bg-bg-elevated border border-border-default rounded-lg text-sm"
+        >
           <.icon name="hero-information-circle" class="size-5 shrink-0 text-info" />
           <div class="text-text-secondary">
             <p>You are running the local mail adapter.</p>
             <p>
-              To see sent emails, visit <.link href="/dev/mailbox" class="text-accent-purple underline">the mailbox page</.link>.
+              To see sent emails, visit <.link
+                href="/dev/mailbox"
+                class="text-accent-purple underline"
+              >the mailbox page</.link>.
             </p>
           </div>
         </div>

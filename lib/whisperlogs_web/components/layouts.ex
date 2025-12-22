@@ -39,7 +39,10 @@ defmodule WhisperLogsWeb.Layouts do
       <header class="flex-shrink-0 border-b border-border-default bg-bg-elevated">
         <div class="px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between">
           <div class="flex items-center gap-4">
-            <a href="/" class="text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight">
+            <a
+              href="/"
+              class="text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight"
+            >
               WhisperLogs
             </a>
 
@@ -134,5 +137,4 @@ defmodule WhisperLogsWeb.Layouts do
     </div>
     """
   end
-
 end

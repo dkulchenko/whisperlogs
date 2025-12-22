@@ -71,10 +71,68 @@ defmodule WhisperLogs.Logs do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> order_by([l], desc: l.timestamp)
+    |> order_by([l], desc: l.timestamp, desc: l.id)
     |> apply_filters(opts)
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  @doc """
+  Lists logs older than the given cursor.
+  Used for infinite scroll - loading older logs when scrolling up.
+
+  Cursor is a tuple `{timestamp, id}` for stable pagination.
+  Returns logs in descending order (newest first within batch).
+  """
+  def list_logs_before({timestamp, id}, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+
+    Log
+    |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id < ^id))
+    |> order_by([l], desc: l.timestamp, desc: l.id)
+    |> apply_filters(opts)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists logs newer than the given cursor.
+  Used for infinite scroll - loading newer logs when scrolling down.
+
+  Cursor is a tuple `{timestamp, id}` for stable pagination.
+  Returns logs in ascending order (oldest first within batch).
+  """
+  def list_logs_after({timestamp, id}, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+
+    Log
+    |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
+    |> order_by([l], asc: l.timestamp, asc: l.id)
+    |> apply_filters(opts)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
+  Checks if logs exist before the given cursor.
+  """
+  def has_logs_before?({timestamp, id}, opts \\ []) do
+    Log
+    |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id < ^id))
+    |> apply_filters(opts)
+    |> limit(1)
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Checks if logs exist after the given cursor.
+  """
+  def has_logs_after?({timestamp, id}, opts \\ []) do
+    Log
+    |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
+    |> apply_filters(opts)
+    |> limit(1)
+    |> Repo.exists?()
   end
 
   defp apply_filters(query, opts) do

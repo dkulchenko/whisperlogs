@@ -14,7 +14,10 @@ defmodule WhisperLogsWeb.UserLive.Registration do
             Register for an account
             <:subtitle>
               Already registered?
-              <.link navigate={~p"/users/log-in"} class="font-semibold text-accent-purple hover:underline">
+              <.link
+                navigate={~p"/users/log-in"}
+                class="font-semibold text-accent-purple hover:underline"
+              >
                 Log in
               </.link>
               to your account now.

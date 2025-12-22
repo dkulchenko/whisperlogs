@@ -64,13 +64,20 @@ defmodule WhisperLogsWeb.CoreComponents do
         @kind == :error && "bg-bg-elevated border-error/50 text-text-primary"
       ]}>
         <.icon :if={@kind == :info} name="hero-information-circle" class="size-5 shrink-0 text-info" />
-        <.icon :if={@kind == :error} name="hero-exclamation-circle" class="size-5 shrink-0 text-error" />
+        <.icon
+          :if={@kind == :error}
+          name="hero-exclamation-circle"
+          class="size-5 shrink-0 text-error"
+        />
         <div class="flex-1 text-sm">
           <p :if={@title} class="font-semibold">{@title}</p>
           <p class="text-text-secondary">{msg}</p>
         </div>
         <button type="button" class="group shrink-0 cursor-pointer" aria-label="close">
-          <.icon name="hero-x-mark" class="size-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
+          <.icon
+            name="hero-x-mark"
+            class="size-5 text-text-tertiary group-hover:text-text-secondary transition-colors"
+          />
         </button>
       </div>
     </div>
@@ -95,7 +102,8 @@ defmodule WhisperLogsWeb.CoreComponents do
     variants = %{
       "primary" => "bg-accent-purple hover:bg-accent-purple-hover text-white font-medium",
       "ghost" => "bg-transparent hover:bg-bg-surface text-text-secondary hover:text-text-primary",
-      "default" => "bg-bg-surface hover:bg-bg-muted text-text-primary font-medium border border-border-default"
+      "default" =>
+        "bg-bg-surface hover:bg-bg-muted text-text-primary font-medium border border-border-default"
     }
 
     assigns =
@@ -225,7 +233,10 @@ defmodule WhisperLogsWeb.CoreComponents do
           name={@name}
           value="true"
           checked={@checked}
-          class={@class || "checkbox checkbox-sm border-border-default checked:bg-accent-purple checked:border-accent-purple"}
+          class={
+            @class ||
+              "checkbox checkbox-sm border-border-default checked:bg-accent-purple checked:border-accent-purple"
+          }
           {@rest}
         />
         <span class="text-sm text-text-secondary">{@label}</span>
@@ -239,11 +250,17 @@ defmodule WhisperLogsWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">
+          {@label}
+        </span>
         <select
           id={@id}
           name={@name}
-          class={[@class || "w-full select bg-bg-surface border-border-default text-text-primary focus:outline-none focus:border-text-tertiary", @errors != [] && (@error_class || "select-error border-error")]}
+          class={[
+            @class ||
+              "w-full select bg-bg-surface border-border-default text-text-primary focus:outline-none focus:border-text-tertiary",
+            @errors != [] && (@error_class || "select-error border-error")
+          ]}
           multiple={@multiple}
           {@rest}
         >
@@ -260,12 +277,15 @@ defmodule WhisperLogsWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">
+          {@label}
+        </span>
         <textarea
           id={@id}
           name={@name}
           class={[
-            @class || "w-full textarea bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
+            @class ||
+              "w-full textarea bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
             @errors != [] && (@error_class || "textarea-error border-error")
           ]}
           {@rest}
@@ -281,14 +301,17 @@ defmodule WhisperLogsWeb.CoreComponents do
     ~H"""
     <div class="fieldset mb-3">
       <label>
-        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">{@label}</span>
+        <span :if={@label} class="label mb-1.5 text-sm font-medium text-text-secondary">
+          {@label}
+        </span>
         <input
           type={@type}
           name={@name}
           id={@id}
           value={Phoenix.HTML.Form.normalize_value(@type, @value)}
           class={[
-            @class || "w-full input bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
+            @class ||
+              "w-full input bg-bg-surface border-border-default text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary",
             @errors != [] && (@error_class || "input-error border-error")
           ]}
           {@rest}
