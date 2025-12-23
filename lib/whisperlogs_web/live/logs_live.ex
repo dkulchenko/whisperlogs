@@ -15,7 +15,8 @@ defmodule WhisperLogsWeb.LogsLive do
 
     sources = Logs.list_sources()
     filters = default_filters()
-    logs = Logs.list_logs(limit: @max_logs) |> Enum.reverse()
+    opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
+    logs = Logs.list_logs(opts) |> Enum.reverse()
 
     {cursor_top, cursor_bottom} = extract_cursors(logs)
     has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
@@ -34,6 +35,8 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_newer?, false)
      |> assign(:loading_older?, false)
      |> assign(:loading_newer?, false)
+     |> assign(:scroll_to_date, "")
+     |> assign(:scroll_to_time, "")
      |> stream(:logs, logs)}
   end
 
@@ -62,10 +65,21 @@ defmodule WhisperLogsWeb.LogsLive do
         opts
       end
 
-    if filters.levels != [] do
-      Keyword.put(opts, :levels, filters.levels)
-    else
-      opts
+    opts =
+      if filters.levels != [] do
+        Keyword.put(opts, :levels, filters.levels)
+      else
+        opts
+      end
+
+    case filters.time_range do
+      "3h" -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -3, :hour))
+      "12h" -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -12, :hour))
+      "24h" -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -24, :hour))
+      "7d" -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -7, :day))
+      "30d" -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -30, :day))
+      "all" -> opts
+      _ -> Keyword.put(opts, :from, DateTime.add(DateTime.utc_now(), -3, :hour))
     end
   end
 
@@ -218,8 +232,8 @@ defmodule WhisperLogsWeb.LogsLive do
           class="flex-shrink-0 border-t border-border-default bg-bg-elevated px-4 py-2.5"
         >
           <div class="flex items-center gap-4">
-            <%!-- Search --%>
-            <div class="relative flex-1">
+            <%!-- Search with time range --%>
+            <div class="relative flex-1 flex items-center bg-bg-surface border border-border-default rounded-lg focus-within:border-text-tertiary transition-colors">
               <.icon
                 name="hero-magnifying-glass"
                 class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary"
@@ -230,8 +244,19 @@ defmodule WhisperLogsWeb.LogsLive do
                 value={@filters.search}
                 phx-debounce="300"
                 placeholder="Search messages..."
-                class="w-full bg-bg-surface border border-border-default rounded-lg pl-9 pr-3 py-1.5 text-smaller text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary transition-colors"
+                class="flex-1 bg-transparent pl-9 pr-2 py-1.5 text-smaller text-text-primary placeholder:text-text-tertiary focus:outline-none"
               />
+              <select
+                name="time_range"
+                class="bg-transparent border-l border-border-default px-2 py-1.5 text-smaller text-text-secondary focus:outline-none cursor-pointer"
+              >
+                <option value="3h" selected={@filters.time_range == "3h"}>Last 3h</option>
+                <option value="12h" selected={@filters.time_range == "12h"}>Last 12h</option>
+                <option value="24h" selected={@filters.time_range == "24h"}>Last 24h</option>
+                <option value="7d" selected={@filters.time_range == "7d"}>Last 7d</option>
+                <option value="30d" selected={@filters.time_range == "30d"}>Last 30d</option>
+                <option value="all" selected={@filters.time_range == "all"}>All time</option>
+              </select>
             </div>
 
             <%!-- Level filter --%>
@@ -272,6 +297,49 @@ defmodule WhisperLogsWeb.LogsLive do
                 </option>
               </select>
             <% end %>
+
+            <%!-- Scroll to time --%>
+            <div class="relative">
+              <button
+                type="button"
+                phx-click={JS.toggle(to: "#scroll-to-popover")}
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
+              >
+                <.icon name="hero-clock" class="size-3.5" /> Scroll to
+              </button>
+              <div
+                id="scroll-to-popover"
+                class="hidden absolute bottom-full right-0 mb-2 p-3 bg-bg-elevated border border-border-default rounded-lg shadow-lg z-50"
+                phx-click-away={JS.hide(to: "#scroll-to-popover")}
+              >
+                <div class="flex items-center gap-2">
+                  <input
+                    type="date"
+                    id="scroll-to-date"
+                    name="scroll_to_date"
+                    value={@scroll_to_date}
+                    phx-change="update-scroll-to"
+                    class="bg-bg-surface border border-border-default rounded-lg px-2 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary"
+                  />
+                  <input
+                    type="time"
+                    id="scroll-to-time"
+                    name="scroll_to_time"
+                    value={@scroll_to_time}
+                    phx-change="update-scroll-to"
+                    step="1"
+                    class="bg-bg-surface border border-border-default rounded-lg px-2 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary"
+                  />
+                  <button
+                    type="button"
+                    phx-click={JS.push("scroll-to-time") |> JS.hide(to: "#scroll-to-popover")}
+                    class="px-3 py-1.5 bg-accent-purple text-white rounded-lg text-smaller font-medium hover:bg-accent-purple/90 transition-colors"
+                  >
+                    Go
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <%!-- Live tail toggle --%>
             <button
@@ -426,7 +494,8 @@ defmodule WhisperLogsWeb.LogsLive do
     filters = %{
       search: params["search"] || "",
       source: params["source"] || "",
-      levels: params["levels"] || []
+      levels: params["levels"] || [],
+      time_range: params["time_range"] || socket.assigns.filters.time_range
     }
 
     logs = fetch_logs(filters)
@@ -447,6 +516,26 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("toggle_live_tail", _params, socket) do
     {:noreply, assign(socket, :live_tail, !socket.assigns.live_tail)}
+  end
+
+  def handle_event("update-scroll-to", params, socket) do
+    socket =
+      socket
+      |> assign(:scroll_to_date, params["scroll_to_date"] || socket.assigns.scroll_to_date)
+      |> assign(:scroll_to_time, params["scroll_to_time"] || socket.assigns.scroll_to_time)
+
+    {:noreply, socket}
+  end
+
+  def handle_event("scroll-to-time", _params, socket) do
+    date = socket.assigns.scroll_to_date
+    time = socket.assigns.scroll_to_time
+
+    if date != "" and time != "" do
+      do_scroll_to_time(socket, date, time)
+    else
+      {:noreply, socket |> put_flash(:info, "Please enter both date and time")}
+    end
   end
 
   def handle_event("clear_filters", _params, socket) do
@@ -642,18 +731,66 @@ defmodule WhisperLogsWeb.LogsLive do
     end
   end
 
+  defp do_scroll_to_time(socket, date, time) do
+    # Parse date and time from local timezone to UTC
+    # Time input with step=1 already includes seconds (HH:MM:SS)
+    time_with_seconds =
+      if String.contains?(time, ":") and length(String.split(time, ":")) == 3,
+        do: time,
+        else: "#{time}:00"
+
+    with {:ok, naive} <- NaiveDateTime.from_iso8601("#{date}T#{time_with_seconds}"),
+         local_dt <- DateTime.from_naive!(naive, "America/Los_Angeles"),
+         utc_dt <- DateTime.shift_zone!(local_dt, "Etc/UTC") do
+      # Create cursor and fetch logs around that time
+      cursor = {utc_dt, 0}
+      filters = default_filters() |> Map.put(:time_range, "all")
+      logs = Logs.list_logs_around(cursor, limit: @max_logs)
+
+      if logs == [] do
+        {:noreply, socket |> put_flash(:info, "No logs found around that time")}
+      else
+        {cursor_top, cursor_bottom} = extract_cursors(logs)
+        has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, [])
+        has_newer? = cursor_bottom != nil and Logs.has_logs_after?(cursor_bottom, [])
+
+        # Find the first log at or after the target time
+        target_log =
+          Enum.find(logs, List.first(logs), fn log ->
+            DateTime.compare(log.timestamp, utc_dt) != :lt
+          end)
+
+        {:noreply,
+         socket
+         |> assign(:filters, filters)
+         |> assign(:cursor_top, cursor_top)
+         |> assign(:cursor_bottom, cursor_bottom)
+         |> assign(:has_older?, has_older?)
+         |> assign(:has_newer?, has_newer?)
+         |> assign(:at_bottom?, false)
+         |> stream(:logs, logs, reset: true)
+         |> push_event("scroll-to-log", %{log_id: target_log.id})}
+      end
+    else
+      _ ->
+        {:noreply, socket |> put_flash(:error, "Invalid date/time format")}
+    end
+  end
+
   defp default_filters do
     %{
       search: "",
       source: "",
-      levels: ~w(debug info warning error)
+      levels: ~w(debug info warning error),
+      time_range: "3h"
     }
   end
 
   defp filters_active?(filters) do
     filters.search != "" or
       filters.source != "" or
-      filters.levels != ~w(debug info warning error)
+      filters.levels != ~w(debug info warning error) or
+      filters.time_range != "3h"
   end
 
   defp fetch_logs(filters) do
