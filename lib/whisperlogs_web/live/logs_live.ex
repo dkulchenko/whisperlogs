@@ -393,6 +393,33 @@ defmodule WhisperLogsWeb.LogsLive do
 
                   <div>
                     <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-funnel" class="size-3.5 text-cyan-400" />
+                      <span class="font-medium text-text-primary">Special Filters</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Filter by level, timestamp, or source
+                    </p>
+                    <div class="mt-1 ml-5 space-y-1">
+                      <code class="block px-2 py-1 bg-bg-surface rounded font-mono">
+                        <span class="text-cyan-400">level</span><span class="text-text-tertiary">:</span><span class="text-cyan-300">error</span>
+                      </code>
+                      <code class="block px-2 py-1 bg-bg-surface rounded font-mono">
+                        <span class="text-cyan-400">timestamp</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">&gt;</span><span class="text-cyan-300">-1h</span>
+                      </code>
+                      <code class="block px-2 py-1 bg-bg-surface rounded font-mono">
+                        <span class="text-cyan-400">source</span><span class="text-text-tertiary">:</span><span class="text-cyan-300">prod</span>
+                      </code>
+                    </div>
+                    <p class="text-text-tertiary ml-5 mt-1 text-[10px]">
+                      Timestamps: today, yesterday, -1h, -7d, 2025-08-12
+                    </p>
+                    <p class="text-text-tertiary ml-5 text-[10px]">
+                      Levels: debug/dbg, info/inf, warning/warn, error/err
+                    </p>
+                  </div>
+
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
                       <.icon name="hero-minus-circle" class="size-3.5 text-red-400" />
                       <span class="font-medium text-text-primary">Exclude Terms</span>
                     </div>
@@ -679,6 +706,13 @@ defmodule WhisperLogsWeb.LogsLive do
         { type: 'term', regex: /[\w.-]+/ }
       ]
 
+      // Pseudo-keys filter on schema fields, not metadata JSONB
+      const PSEUDO_KEYS = ['level', 'timestamp', 'source']
+
+      function isPseudoKey(key) {
+        return PSEUDO_KEYS.includes(key.toLowerCase())
+      }
+
       function highlightToken(token, type) {
         const escaped = token.replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
@@ -690,13 +724,18 @@ defmodule WhisperLogsWeb.LogsLive do
           case 'metadata_quoted':
             const [key, ...valueParts] = token.split(':')
             const value = valueParts.join(':')
-            return `<span class="text-purple-400">${key.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-purple-300">${value.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+            // Use cyan for pseudo-keys, purple for regular metadata
+            const keyColor = isPseudoKey(key) ? 'text-cyan-400' : 'text-purple-400'
+            const valColor = isPseudoKey(key) ? 'text-cyan-300' : 'text-purple-300'
+            return `<span class="${keyColor}">${key.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="${valColor}">${value.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
 
           case 'metadata_op':
             const opMatch = token.match(/^([\w.-]+):(>=|<=|>|<)([\w.-]+)$/)
             if (opMatch) {
               const [, mKey, mOp, mVal] = opMatch
-              return `<span class="text-purple-400">${mKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${mOp}</span><span class="text-purple-300">${mVal}</span>`
+              const mKeyColor = isPseudoKey(mKey) ? 'text-cyan-400' : 'text-purple-400'
+              const mValColor = isPseudoKey(mKey) ? 'text-cyan-300' : 'text-purple-300'
+              return `<span class="${mKeyColor}">${mKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${mOp}</span><span class="${mValColor}">${mVal}</span>`
             }
             return escaped
 
@@ -708,13 +747,18 @@ defmodule WhisperLogsWeb.LogsLive do
             const content = token.slice(1) // remove leading -
             const [eKey, ...eValueParts] = content.split(':')
             const eValue = eValueParts.join(':')
-            return `<span class="text-red-400">-</span><span class="text-red-300">${eKey.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-red-300">${eValue.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+            // Use orange for excluded pseudo-keys, red for regular excluded metadata
+            const eKeyColor = isPseudoKey(eKey) ? 'text-orange-400' : 'text-red-300'
+            const eValColor = isPseudoKey(eKey) ? 'text-orange-300' : 'text-red-300'
+            return `<span class="text-red-400">-</span><span class="${eKeyColor}">${eKey.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="${eValColor}">${eValue.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
 
           case 'exclude_metadata_op':
             const eOpMatch = token.match(/^-([\w.-]+):(>=|<=|>|<)([\w.-]+)$/)
             if (eOpMatch) {
               const [, emKey, emOp, emVal] = eOpMatch
-              return `<span class="text-red-400">-</span><span class="text-red-300">${emKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${emOp}</span><span class="text-red-300">${emVal}</span>`
+              const emKeyColor = isPseudoKey(emKey) ? 'text-orange-400' : 'text-red-300'
+              const emValColor = isPseudoKey(emKey) ? 'text-orange-300' : 'text-red-300'
+              return `<span class="text-red-400">-</span><span class="${emKeyColor}">${emKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${emOp}</span><span class="${emValColor}">${emVal}</span>`
             }
             return escaped
 
@@ -1189,6 +1233,52 @@ defmodule WhisperLogsWeb.LogsLive do
       nil -> true
       v -> not compare_numeric(v, operator, value)
     end
+  end
+
+  # Level filter - exact match on level field
+  defp log_matches_token?(log, {:level_filter, level}) do
+    log.level == level
+  end
+
+  defp log_matches_token?(log, {:exclude_level_filter, level}) do
+    log.level != level
+  end
+
+  # Timestamp filter - comparison on timestamp field
+  defp log_matches_token?(log, {:timestamp_filter, :eq, datetime}) do
+    # Match within the same second
+    diff = DateTime.diff(log.timestamp, datetime, :second)
+    diff >= 0 and diff < 1
+  end
+
+  defp log_matches_token?(log, {:timestamp_filter, :gt, datetime}) do
+    DateTime.compare(log.timestamp, datetime) == :gt
+  end
+
+  defp log_matches_token?(log, {:timestamp_filter, :gte, datetime}) do
+    DateTime.compare(log.timestamp, datetime) in [:gt, :eq]
+  end
+
+  defp log_matches_token?(log, {:timestamp_filter, :lt, datetime}) do
+    DateTime.compare(log.timestamp, datetime) == :lt
+  end
+
+  defp log_matches_token?(log, {:timestamp_filter, :lte, datetime}) do
+    DateTime.compare(log.timestamp, datetime) in [:lt, :eq]
+  end
+
+  # Exclude timestamp filter - negate the condition
+  defp log_matches_token?(log, {:exclude_timestamp_filter, operator, datetime}) do
+    not log_matches_token?(log, {:timestamp_filter, operator, datetime})
+  end
+
+  # Source filter - case-insensitive contains
+  defp log_matches_token?(log, {:source_filter, pattern}) do
+    String.contains?(String.downcase(log.source || ""), String.downcase(pattern))
+  end
+
+  defp log_matches_token?(log, {:exclude_source_filter, pattern}) do
+    not String.contains?(String.downcase(log.source || ""), String.downcase(pattern))
   end
 
   defp compare_numeric(metadata_value, operator, search_value) do

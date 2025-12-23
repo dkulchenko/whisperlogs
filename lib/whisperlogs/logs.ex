@@ -315,7 +315,14 @@ defmodule WhisperLogs.Logs do
         where(
           query,
           [l],
-          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric <= ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+          fragment(
+            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric <= ?)",
+            l.metadata,
+            ^key,
+            l.metadata,
+            ^key,
+            ^num
+          )
         )
 
       :error ->
@@ -329,7 +336,14 @@ defmodule WhisperLogs.Logs do
         where(
           query,
           [l],
-          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric < ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+          fragment(
+            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric < ?)",
+            l.metadata,
+            ^key,
+            l.metadata,
+            ^key,
+            ^num
+          )
         )
 
       :error ->
@@ -343,7 +357,14 @@ defmodule WhisperLogs.Logs do
         where(
           query,
           [l],
-          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric >= ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+          fragment(
+            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric >= ?)",
+            l.metadata,
+            ^key,
+            l.metadata,
+            ^key,
+            ^num
+          )
         )
 
       :error ->
@@ -357,12 +378,87 @@ defmodule WhisperLogs.Logs do
         where(
           query,
           [l],
-          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric > ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+          fragment(
+            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric > ?)",
+            l.metadata,
+            ^key,
+            l.metadata,
+            ^key,
+            ^num
+          )
         )
 
       :error ->
         query
     end
+  end
+
+  # Level filter - exact match on level field
+  defp apply_search_token({:level_filter, level}, query) do
+    where(query, [l], l.level == ^level)
+  end
+
+  defp apply_search_token({:exclude_level_filter, level}, query) do
+    where(query, [l], l.level != ^level)
+  end
+
+  # Timestamp filter - comparison on timestamp field
+  defp apply_search_token({:timestamp_filter, :eq, datetime}, query) do
+    # For equality on a date (no time component), match the entire day
+    # For datetime, match within the same second
+    start_dt = DateTime.truncate(datetime, :second)
+    end_dt = DateTime.add(start_dt, 1, :second)
+    where(query, [l], l.timestamp >= ^start_dt and l.timestamp < ^end_dt)
+  end
+
+  defp apply_search_token({:timestamp_filter, :gt, datetime}, query) do
+    where(query, [l], l.timestamp > ^datetime)
+  end
+
+  defp apply_search_token({:timestamp_filter, :gte, datetime}, query) do
+    where(query, [l], l.timestamp >= ^datetime)
+  end
+
+  defp apply_search_token({:timestamp_filter, :lt, datetime}, query) do
+    where(query, [l], l.timestamp < ^datetime)
+  end
+
+  defp apply_search_token({:timestamp_filter, :lte, datetime}, query) do
+    where(query, [l], l.timestamp <= ^datetime)
+  end
+
+  # Exclude timestamp filter - negate the condition
+  defp apply_search_token({:exclude_timestamp_filter, :eq, datetime}, query) do
+    start_dt = DateTime.truncate(datetime, :second)
+    end_dt = DateTime.add(start_dt, 1, :second)
+    where(query, [l], l.timestamp < ^start_dt or l.timestamp >= ^end_dt)
+  end
+
+  defp apply_search_token({:exclude_timestamp_filter, :gt, datetime}, query) do
+    where(query, [l], l.timestamp <= ^datetime)
+  end
+
+  defp apply_search_token({:exclude_timestamp_filter, :gte, datetime}, query) do
+    where(query, [l], l.timestamp < ^datetime)
+  end
+
+  defp apply_search_token({:exclude_timestamp_filter, :lt, datetime}, query) do
+    where(query, [l], l.timestamp >= ^datetime)
+  end
+
+  defp apply_search_token({:exclude_timestamp_filter, :lte, datetime}, query) do
+    where(query, [l], l.timestamp > ^datetime)
+  end
+
+  # Source filter - ILIKE pattern match on source field
+  defp apply_search_token({:source_filter, pattern}, query) do
+    like_pattern = SearchParser.escape_like(pattern)
+    where(query, [l], ilike(l.source, ^like_pattern))
+  end
+
+  defp apply_search_token({:exclude_source_filter, pattern}, query) do
+    like_pattern = SearchParser.escape_like(pattern)
+    where(query, [l], not ilike(l.source, ^like_pattern))
   end
 
   defp filter_request_id(query, nil), do: query
