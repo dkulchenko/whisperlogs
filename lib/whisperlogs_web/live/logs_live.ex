@@ -295,7 +295,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
     <script :type={Phoenix.LiveView.ColocatedHook} name=".InfiniteScroll">
       const LOAD_THRESHOLD_PERCENT = 0.25  // load when within 25% of edge
-      const BOTTOM_THRESHOLD = 100        // pixels from bottom to be considered "at bottom"
+      const BOTTOM_THRESHOLD = 100         // pixels from bottom to be considered "at bottom"
 
       export default {
         mounted() {
@@ -303,15 +303,16 @@ defmodule WhisperLogsWeb.LogsLive do
           this.loadingNewer = false
           this.isNearBottom = true
           this.wasNearBottom = true
+          this.lastScrollTop = this.el.scrollTop
 
           this.el.addEventListener("scroll", () => {
             const { scrollTop, scrollHeight, clientHeight } = this.el
-            const distanceFromTop = scrollTop
             const distanceFromBottom = scrollHeight - scrollTop - clientHeight
 
-            // Check data attributes for whether loading is possible
-            const hasOlder = this.el.dataset.hasOlder === "true"
-            const hasNewer = this.el.dataset.hasNewer === "true"
+            // Track scroll direction
+            const isScrollingUp = scrollTop < this.lastScrollTop
+            const isScrollingDown = scrollTop > this.lastScrollTop
+            this.lastScrollTop = scrollTop
 
             // Near-bottom tracking for live tail
             this.isNearBottom = distanceFromBottom < BOTTOM_THRESHOLD
@@ -328,18 +329,22 @@ defmodule WhisperLogsWeb.LogsLive do
             const maxScroll = scrollHeight - clientHeight
             const scrollPercent = maxScroll > 0 ? scrollTop / maxScroll : 0
 
-            // Anticipatory load older (scrolling up) - when in top 25% of scroll range
-            if (hasOlder && scrollPercent < LOAD_THRESHOLD_PERCENT && !this.loadingOlder) {
+            const hasOlder = this.el.dataset.hasOlder === "true"
+            const hasNewer = this.el.dataset.hasNewer === "true"
+
+            // KEY FIX: Direction checking prevents infinite loops
+            // Load older only when scrolling UP and in top 25%
+            if (hasOlder && isScrollingUp && scrollPercent < LOAD_THRESHOLD_PERCENT && !this.loadingOlder) {
               this.loadingOlder = true
-              this.pushEvent("load-older", {}, (reply) => {
+              this.pushEvent("load-older", {}, () => {
                 this.loadingOlder = false
               })
             }
 
-            // Anticipatory load newer (scrolling down) - when in bottom 25% of scroll range
-            if (hasNewer && scrollPercent > (1 - LOAD_THRESHOLD_PERCENT) && !this.loadingNewer) {
+            // Load newer only when scrolling DOWN and in bottom 25%
+            if (hasNewer && isScrollingDown && scrollPercent > (1 - LOAD_THRESHOLD_PERCENT) && !this.loadingNewer) {
               this.loadingNewer = true
-              this.pushEvent("load-newer", {}, (reply) => {
+              this.pushEvent("load-newer", {}, () => {
                 this.loadingNewer = false
               })
             }
@@ -348,124 +353,23 @@ defmodule WhisperLogsWeb.LogsLive do
           // Initial scroll to bottom
           this.el.scrollTop = this.el.scrollHeight
 
-          // Handle server-pushed scroll-to-bottom (e.g., from Jump to Latest)
+          // Handle Jump to Latest
           this.handleEvent("force-scroll-bottom", () => {
             this.el.scrollTop = this.el.scrollHeight
             this.isNearBottom = true
             this.wasNearBottom = true
+            this.lastScrollTop = this.el.scrollTop
           })
-
-          // MutationObserver for scroll adjustment at edges (runs synchronously before paint)
-          const logsContainer = this.el.querySelector("#logs")
-          if (logsContainer) {
-            this.observer = new MutationObserver(() => {
-              // Top edge: adjust scroll to keep anchor in place
-              if (this.topEdgeAnchor) {
-                const anchor = document.getElementById(this.topEdgeAnchor.id)
-                if (anchor) {
-                  const containerRect = this.el.getBoundingClientRect()
-                  const anchorRect = anchor.getBoundingClientRect()
-                  const currentOffset = anchorRect.top - containerRect.top
-                  const delta = currentOffset - this.topEdgeAnchor.offset
-                  if (delta > 1) {
-                    this.el.scrollTop += delta
-                    this.needsScrollDispatch = true
-                  }
-                }
-                this.topEdgeAnchor = null
-              }
-
-              // Bottom edge: scroll to new bottom to follow content
-              if (this.bottomEdgeActive) {
-                this.el.scrollTop = this.el.scrollHeight
-                this.needsScrollDispatch = true
-              }
-            })
-            this.observer.observe(logsContainer, { childList: true })
-          }
-        },
-
-        destroyed() {
-          if (this.observer) {
-            this.observer.disconnect()
-          }
-        },
-
-        beforeUpdate() {
-          // Native overflow-anchor handles most cases, but fails at edges
-          // For those cases, we use MutationObserver for synchronous adjustment
-          this.topEdgeAnchor = null
-          this.bottomEdgeActive = false
-          this.needsScrollDispatch = false
-
-          const { scrollTop, scrollHeight, clientHeight } = this.el
-          const maxScroll = scrollHeight - clientHeight
-          const scrollPercent = maxScroll > 0 ? scrollTop / maxScroll : 0
-
-          // Top edge: save anchor for scroll preservation
-          if (scrollPercent < LOAD_THRESHOLD_PERCENT && !this.isNearBottom) {
-            const logsContainer = this.el.querySelector("#logs")
-            if (logsContainer) {
-              for (const child of logsContainer.children) {
-                if (child.id && child.id !== "logs-empty") {
-                  const containerRect = this.el.getBoundingClientRect()
-                  const anchorRect = child.getBoundingClientRect()
-                  this.topEdgeAnchor = {
-                    id: child.id,
-                    offset: anchorRect.top - containerRect.top
-                  }
-                  break
-                }
-              }
-            }
-          }
-
-          // Bottom edge: track if we should scroll to bottom after update
-          if (scrollPercent > (1 - LOAD_THRESHOLD_PERCENT) || this.isNearBottom) {
-            this.bottomEdgeActive = true
-          }
         },
 
         updated() {
-          // Reset loading flags
-          this.loadingOlder = false
-          this.loadingNewer = false
-
-          // Auto-scroll to bottom for live tail
+          // Auto-scroll to bottom for live tail only
           if (this.isNearBottom) {
             this.el.scrollTop = this.el.scrollHeight
+            this.lastScrollTop = this.el.scrollTop
           }
-
-          // Dispatch scroll event to re-trigger load checks after flags are reset
-          // This handles the "slam into edge" case where user can't scroll further
-          if (this.needsScrollDispatch) {
-            this.needsScrollDispatch = false
-            this.bottomEdgeActive = false
-            this.el.dispatchEvent(new Event('scroll'))
-          }
-
-          // Handle edge case: user stuck at boundary after adjustment
-          // Re-check using same percentage thresholds as scroll handler
-          setTimeout(() => {
-            const { scrollTop, scrollHeight, clientHeight } = this.el
-            const maxScroll = scrollHeight - clientHeight
-            const scrollPercent = maxScroll > 0 ? scrollTop / maxScroll : 0
-
-            const hasOlder = this.el.dataset.hasOlder === "true"
-            const hasNewer = this.el.dataset.hasNewer === "true"
-
-            // In top 25% zone, trigger load-older
-            if (scrollPercent < LOAD_THRESHOLD_PERCENT && hasOlder && !this.loadingOlder) {
-              this.loadingOlder = true
-              this.pushEvent("load-older", {}, () => { this.loadingOlder = false })
-            }
-
-            // In bottom 25% zone, trigger load-newer
-            if (scrollPercent > (1 - LOAD_THRESHOLD_PERCENT) && hasNewer && !this.loadingNewer) {
-              this.loadingNewer = true
-              this.pushEvent("load-newer", {}, () => { this.loadingNewer = false })
-            }
-          }, 50)
+          // NOTE: No flag resets here - callback handles it
+          // NOTE: No setTimeout re-checks - direction check prevents loops
         }
       }
     </script>
