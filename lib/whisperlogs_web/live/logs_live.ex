@@ -259,7 +259,7 @@ defmodule WhisperLogsWeb.LogsLive do
         <button
           :if={@far_from_bottom? or @has_newer?}
           phx-click="jump-to-latest"
-          class="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-accent-purple text-white text-xs font-medium rounded-full shadow-lg hover:bg-accent-purple/90 transition-colors"
+          class="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-bg-elevated text-purple-400 text-xs font-medium rounded-full shadow-lg hover:bg-bg-surface transition-colors border border-purple-500/30"
         >
           <.icon name="hero-arrow-down" class="size-4" /> Jump to latest
         </button>
@@ -373,7 +373,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   <button
                     type="button"
                     phx-click={JS.push("scroll-to-time") |> JS.hide(to: "#scroll-to-popover")}
-                    class="px-3 py-1.5 bg-accent-purple text-white rounded-lg text-smaller font-medium hover:bg-accent-purple/90 transition-colors"
+                    class="px-3 py-1.5 bg-purple-500/10 text-purple-400 rounded-lg text-smaller font-medium hover:bg-purple-500/20 transition-colors border border-purple-500/30"
                   >
                     Go
                   </button>
@@ -387,16 +387,16 @@ defmodule WhisperLogsWeb.LogsLive do
               phx-click="toggle_live_tail"
               class={[
                 "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border",
-                @live_tail && "bg-accent-purple border-accent-purple text-white",
+                @live_tail && "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20",
                 !@live_tail &&
                   "bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
               ]}
             >
               <%= if @live_tail do %>
                 <span class="relative flex size-2">
-                  <span class="live-wave absolute inset-0 rounded-full bg-white"></span>
-                  <span class="live-wave-delayed absolute inset-0 rounded-full bg-white"></span>
-                  <span class="relative inline-flex rounded-full size-2 bg-white"></span>
+                  <span class="live-wave absolute inset-0 rounded-full bg-purple-400"></span>
+                  <span class="live-wave-delayed absolute inset-0 rounded-full bg-purple-400"></span>
+                  <span class="relative inline-flex rounded-full size-2 bg-purple-400"></span>
                 </span>
               <% else %>
                 <.icon name="hero-pause" class="size-3.5" />
@@ -872,9 +872,9 @@ defmodule WhisperLogsWeb.LogsLive do
 
   # Filter button styling (when selected)
   defp level_filter_bg("debug"), do: "bg-bg-muted border-text-tertiary text-text-secondary"
-  defp level_filter_bg("info"), do: "bg-blue-500/20 border-blue-500/50 text-blue-400"
-  defp level_filter_bg("warning"), do: "bg-amber-500/20 border-amber-500/50 text-amber-400"
-  defp level_filter_bg("error"), do: "bg-red-500/20 border-red-500/50 text-red-400"
+  defp level_filter_bg("info"), do: "bg-blue-400/20 border-blue-400/50 text-blue-300"
+  defp level_filter_bg("warning"), do: "bg-amber-400/20 border-amber-400/50 text-amber-300"
+  defp level_filter_bg("error"), do: "bg-red-400/20 border-red-400/50 text-red-300"
   defp level_filter_bg(_), do: "bg-bg-muted border-border-default text-text-secondary"
 
   # Level abbreviations
