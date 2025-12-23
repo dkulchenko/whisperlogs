@@ -10,6 +10,7 @@ defmodule WhisperLogs.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
+      releases: releases(),
       compilers: [:phoenix_live_view] ++ Mix.compilers(),
       listeners: [Phoenix.CodeReloader]
     ]
@@ -28,6 +29,23 @@ defmodule WhisperLogs.MixProject do
   def cli do
     [
       preferred_envs: [precommit: :test]
+    ]
+  end
+
+  defp releases do
+    [
+      whisperlogs: [
+        steps: [:assemble, &Burrito.wrap/1],
+        burrito: [
+          targets: [
+            linux: [os: :linux, cpu: :x86_64],
+            linux_arm: [os: :linux, cpu: :aarch64],
+            macos: [os: :darwin, cpu: :x86_64],
+            macos_arm: [os: :darwin, cpu: :aarch64],
+            windows: [os: :windows, cpu: :x86_64]
+          ]
+        ]
+      ]
     ]
   end
 
@@ -67,7 +85,8 @@ defmodule WhisperLogs.MixProject do
       {:dns_cluster, "~> 0.2.0"},
       {:bandit, "~> 1.5"},
       {:tz, "~> 0.28"},
-      {:date_time_parser, "~> 1.2"}
+      {:date_time_parser, "~> 1.2"},
+      {:burrito, "~> 1.5"}
     ]
   end
 
