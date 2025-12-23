@@ -377,6 +377,22 @@ defmodule WhisperLogsWeb.LogsLive do
 
                   <div>
                     <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-calculator" class="size-3.5 text-cyan-400" />
+                      <span class="font-medium text-text-primary">Numeric Compare</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Use <span class="text-cyan-400">&gt;</span>
+                      <span class="text-cyan-400">&gt;=</span>
+                      <span class="text-cyan-400">&lt;</span>
+                      <span class="text-cyan-400">&lt;=</span> for numbers
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono">
+                      <span class="text-purple-400">duration_ms</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">&gt;</span><span class="text-purple-300">100</span>
+                    </code>
+                  </div>
+
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
                       <.icon name="hero-minus-circle" class="size-3.5 text-red-400" />
                       <span class="font-medium text-text-primary">Exclude Terms</span>
                     </div>
@@ -650,10 +666,13 @@ defmodule WhisperLogsWeb.LogsLive do
 
     <script :type={Phoenix.LiveView.ColocatedHook} name=".SearchHighlight">
       // Token patterns matching the Elixir parser
+      // Order matters - more specific patterns first
       const TOKEN_PATTERNS = [
         { type: 'exclude_metadata_quoted', regex: /-[\w.-]+:"[^"]*"/ },
         { type: 'metadata_quoted', regex: /[\w.-]+:"[^"]*"/ },
         { type: 'phrase', regex: /"[^"]*"/ },
+        { type: 'exclude_metadata_op', regex: /-[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
+        { type: 'metadata_op', regex: /[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
         { type: 'exclude_metadata', regex: /-[\w.-]+:[\w.-]+/ },
         { type: 'metadata', regex: /[\w.-]+:[\w.-]+/ },
         { type: 'exclude', regex: /-[\w.-]+/ },
@@ -673,6 +692,14 @@ defmodule WhisperLogsWeb.LogsLive do
             const value = valueParts.join(':')
             return `<span class="text-purple-400">${key.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-purple-300">${value.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
 
+          case 'metadata_op':
+            const opMatch = token.match(/^([\w.-]+):(>=|<=|>|<)([\w.-]+)$/)
+            if (opMatch) {
+              const [, mKey, mOp, mVal] = opMatch
+              return `<span class="text-purple-400">${mKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${mOp}</span><span class="text-purple-300">${mVal}</span>`
+            }
+            return escaped
+
           case 'exclude':
             return `<span class="text-red-400">${escaped}</span>`
 
@@ -682,6 +709,14 @@ defmodule WhisperLogsWeb.LogsLive do
             const [eKey, ...eValueParts] = content.split(':')
             const eValue = eValueParts.join(':')
             return `<span class="text-red-400">-</span><span class="text-red-300">${eKey.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-red-300">${eValue.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+
+          case 'exclude_metadata_op':
+            const eOpMatch = token.match(/^-([\w.-]+):(>=|<=|>|<)([\w.-]+)$/)
+            if (eOpMatch) {
+              const [, emKey, emOp, emVal] = eOpMatch
+              return `<span class="text-red-400">-</span><span class="text-red-300">${emKey}</span><span class="text-text-tertiary">:</span><span class="text-cyan-400">${emOp}</span><span class="text-red-300">${emVal}</span>`
+            }
+            return escaped
 
           case 'term':
           default:
@@ -1128,17 +1163,45 @@ defmodule WhisperLogsWeb.LogsLive do
     not log_matches_token?(log, {:term, term})
   end
 
-  defp log_matches_token?(log, {:metadata, key, value}) do
+  defp log_matches_token?(log, {:metadata, key, :eq, value}) do
     case Map.get(log.metadata, key) do
       nil -> false
       v -> String.contains?(String.downcase(to_string(v)), String.downcase(value))
     end
   end
 
-  defp log_matches_token?(log, {:exclude_metadata, key, value}) do
+  defp log_matches_token?(log, {:metadata, key, operator, value}) do
+    case Map.get(log.metadata, key) do
+      nil -> false
+      v -> compare_numeric(v, operator, value)
+    end
+  end
+
+  defp log_matches_token?(log, {:exclude_metadata, key, :eq, value}) do
     case Map.get(log.metadata, key) do
       nil -> true
       v -> not String.contains?(String.downcase(to_string(v)), String.downcase(value))
+    end
+  end
+
+  defp log_matches_token?(log, {:exclude_metadata, key, operator, value}) do
+    case Map.get(log.metadata, key) do
+      nil -> true
+      v -> not compare_numeric(v, operator, value)
+    end
+  end
+
+  defp compare_numeric(metadata_value, operator, search_value) do
+    with {meta_num, ""} <- Float.parse(to_string(metadata_value)),
+         {search_num, ""} <- Float.parse(search_value) do
+      case operator do
+        :gt -> meta_num > search_num
+        :gte -> meta_num >= search_num
+        :lt -> meta_num < search_num
+        :lte -> meta_num <= search_num
+      end
+    else
+      _ -> false
     end
   end
 

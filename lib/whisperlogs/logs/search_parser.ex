@@ -5,18 +5,21 @@ defmodule WhisperLogs.Logs.SearchParser do
   Supports:
   - Plain terms: `error` - search message and all metadata values
   - Metadata filters: `user_id:123` - filter by specific metadata key
+  - Numeric comparisons: `duration_ms:>100` - compare numeric metadata values
   - Negative terms: `-oban` - exclude matches
   - Negative metadata: `-level:debug` - exclude specific metadata key-value
   - Quoted phrases: `"error in module"` - exact phrase match
   - Combined: `error user_id:123 -debug` - multiple conditions (AND logic)
   """
 
+  @type operator :: :eq | :gt | :gte | :lt | :lte
+
   @type token ::
           {:term, String.t()}
           | {:phrase, String.t()}
           | {:exclude, String.t()}
-          | {:metadata, String.t(), String.t()}
-          | {:exclude_metadata, String.t(), String.t()}
+          | {:metadata, String.t(), operator(), String.t()}
+          | {:exclude_metadata, String.t(), operator(), String.t()}
 
   @type parse_result :: {:ok, [token()]} | {:error, String.t()}
 
@@ -28,9 +31,12 @@ defmodule WhisperLogs.Logs.SearchParser do
       iex> SearchParser.parse("error user_id:123 -debug")
       {:ok, [
         {:term, "error"},
-        {:metadata, "user_id", "123"},
+        {:metadata, "user_id", :eq, "123"},
         {:exclude, "debug"}
       ]}
+
+      iex> SearchParser.parse("duration_ms:>100")
+      {:ok, [{:metadata, "duration_ms", :gt, "100"}]}
 
       iex> SearchParser.parse("")
       {:ok, []}
@@ -47,16 +53,25 @@ defmodule WhisperLogs.Logs.SearchParser do
   end
 
   defp tokenize(query) do
-    # Match: quoted strings with optional -key: prefix, key:value pairs, or plain words
+    # Match: quoted strings with optional -key: prefix, key:op:value pairs, or plain words
     # Order matters - more specific patterns first
+    # Added support for comparison operators: >=, <=, >, <
     regex = ~r/
-      -[\w.-]+:"[^"]*"      |  # -key:"quoted value"
-      [\w.-]+:"[^"]*"       |  # key:"quoted value"
-      "[^"]*"               |  # "quoted phrase"
-      -[\w.-]+:[\w.-]+      |  # -key:value
-      [\w.-]+:[\w.-]+       |  # key:value
-      -[\w.-]+              |  # -term
-      [\w.-]+                  # plain term
+      -[\w.-]+:"[^"]*"          |  # -key:"quoted value"
+      [\w.-]+:"[^"]*"           |  # key:"quoted value"
+      "[^"]*"                   |  # "quoted phrase"
+      -[\w.-]+:>=[\w.-]+        |  # -key:>=value
+      -[\w.-]+:<=[\w.-]+        |  # -key:<=value
+      -[\w.-]+:>[\w.-]+         |  # -key:>value
+      -[\w.-]+:<[\w.-]+         |  # -key:<value
+      [\w.-]+:>=[\w.-]+         |  # key:>=value
+      [\w.-]+:<=[\w.-]+         |  # key:<=value
+      [\w.-]+:>[\w.-]+          |  # key:>value
+      [\w.-]+:<[\w.-]+          |  # key:<value
+      -[\w.-]+:[\w.-]+          |  # -key:value
+      [\w.-]+:[\w.-]+           |  # key:value
+      -[\w.-]+                  |  # -term
+      [\w.-]+                      # plain term
     /xu
 
     Regex.scan(regex, query)
@@ -87,6 +102,14 @@ defmodule WhisperLogs.Logs.SearchParser do
         value = unquote_value(token)
         if value != "", do: {:phrase, value}, else: nil
 
+      # Negative metadata filter with operator: -key:>=value, -key:>value, etc.
+      Regex.match?(~r/^-[\w.-]+:(?:>=|<=|>|<)[\w.-]+$/, token) ->
+        parse_metadata_token(String.slice(token, 1..-1//1), :exclude_metadata)
+
+      # Metadata filter with operator: key:>=value, key:>value, etc.
+      Regex.match?(~r/^[\w.-]+:(?:>=|<=|>|<)[\w.-]+$/, token) ->
+        parse_metadata_token(token, :metadata)
+
       # Negative metadata filter: -key:value
       Regex.match?(~r/^-[\w.-]+:[\w.-]+$/, token) ->
         parse_metadata_token(String.slice(token, 1..-1//1), :exclude_metadata)
@@ -108,11 +131,22 @@ defmodule WhisperLogs.Logs.SearchParser do
 
   defp parse_metadata_token(token, type) do
     case String.split(token, ":", parts: 2) do
-      [key, value] when key != "" ->
-        {type, key, unquote_value(value)}
+      [key, value_with_op] when key != "" ->
+        {operator, value} = extract_operator(value_with_op)
+        {type, key, operator, unquote_value(value)}
 
       _ ->
         nil
+    end
+  end
+
+  defp extract_operator(value) do
+    cond do
+      String.starts_with?(value, ">=") -> {:gte, String.slice(value, 2..-1//1)}
+      String.starts_with?(value, "<=") -> {:lte, String.slice(value, 2..-1//1)}
+      String.starts_with?(value, ">") -> {:gt, String.slice(value, 1..-1//1)}
+      String.starts_with?(value, "<") -> {:lt, String.slice(value, 1..-1//1)}
+      true -> {:eq, value}
     end
   end
 

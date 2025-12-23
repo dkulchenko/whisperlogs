@@ -243,14 +243,55 @@ defmodule WhisperLogs.Logs do
     )
   end
 
-  # Metadata key:value filter
-  defp apply_search_token({:metadata, key, value}, query) do
+  # Metadata key:value filter (equality with ILIKE)
+  defp apply_search_token({:metadata, key, :eq, value}, query) do
     pattern = SearchParser.escape_like(value)
     where(query, [l], fragment("?->>? ILIKE ?", l.metadata, ^key, ^pattern))
   end
 
-  # Exclude metadata key:value
-  defp apply_search_token({:exclude_metadata, key, value}, query) do
+  # Metadata numeric comparisons: key:>value, key:>=value, key:<value, key:<=value
+  defp apply_search_token({:metadata, key, :gt, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(query, [l], fragment("NULLIF(?->>?, '')::numeric > ?", l.metadata, ^key, ^num))
+
+      :error ->
+        where(query, [l], false)
+    end
+  end
+
+  defp apply_search_token({:metadata, key, :gte, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(query, [l], fragment("NULLIF(?->>?, '')::numeric >= ?", l.metadata, ^key, ^num))
+
+      :error ->
+        where(query, [l], false)
+    end
+  end
+
+  defp apply_search_token({:metadata, key, :lt, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(query, [l], fragment("NULLIF(?->>?, '')::numeric < ?", l.metadata, ^key, ^num))
+
+      :error ->
+        where(query, [l], false)
+    end
+  end
+
+  defp apply_search_token({:metadata, key, :lte, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(query, [l], fragment("NULLIF(?->>?, '')::numeric <= ?", l.metadata, ^key, ^num))
+
+      :error ->
+        where(query, [l], false)
+    end
+  end
+
+  # Exclude metadata key:value (equality)
+  defp apply_search_token({:exclude_metadata, key, :eq, value}, query) do
     pattern = SearchParser.escape_like(value)
 
     where(
@@ -265,6 +306,63 @@ defmodule WhisperLogs.Logs do
         ^pattern
       )
     )
+  end
+
+  # Exclude metadata numeric comparisons (negate the operator)
+  defp apply_search_token({:exclude_metadata, key, :gt, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(
+          query,
+          [l],
+          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric <= ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+        )
+
+      :error ->
+        query
+    end
+  end
+
+  defp apply_search_token({:exclude_metadata, key, :gte, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(
+          query,
+          [l],
+          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric < ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+        )
+
+      :error ->
+        query
+    end
+  end
+
+  defp apply_search_token({:exclude_metadata, key, :lt, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(
+          query,
+          [l],
+          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric >= ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+        )
+
+      :error ->
+        query
+    end
+  end
+
+  defp apply_search_token({:exclude_metadata, key, :lte, value}, query) do
+    case parse_numeric(value) do
+      {:ok, num} ->
+        where(
+          query,
+          [l],
+          fragment("(?->>? IS NULL OR NULLIF(?->>?, '')::numeric > ?)", l.metadata, ^key, l.metadata, ^key, ^num)
+        )
+
+      :error ->
+        query
+    end
   end
 
   defp filter_request_id(query, nil), do: query
@@ -439,4 +537,13 @@ defmodule WhisperLogs.Logs do
   defp normalize_level(level) when level in ~w(debug info warning error), do: level
   defp normalize_level("warn"), do: "warning"
   defp normalize_level(_), do: "info"
+
+  defp parse_numeric(value) when is_binary(value) do
+    case Decimal.parse(value) do
+      {decimal, ""} -> {:ok, decimal}
+      _ -> :error
+    end
+  end
+
+  defp parse_numeric(_), do: :error
 end
