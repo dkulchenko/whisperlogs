@@ -53,6 +53,8 @@ defmodule WhisperLogsWeb.Router do
       live "/", LogsLive
       live "/sources", SourcesLive
       live "/metrics", MetricsLive
+      live "/alerts", AlertsLive
+      live "/notification-channels", NotificationChannelsLive
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

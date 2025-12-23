@@ -7,6 +7,7 @@ defmodule WhisperLogs.Accounts do
   alias WhisperLogs.Repo
 
   alias WhisperLogs.Accounts.{Source, User, UserToken, UserNotifier}
+  alias WhisperLogs.SourceCache
 
   ## Database getters
 
@@ -324,8 +325,27 @@ defmodule WhisperLogs.Accounts do
   Gets a source by raw API token (HTTP sources only).
 
   Returns `{:ok, source}` if valid and active, `{:error, :invalid_key}` otherwise.
+
+  Results are cached in ETS for 15s to reduce database load during high-volume ingestion.
   """
   def get_source_by_token(key) when is_binary(key) do
+    case SourceCache.get_source(key) do
+      {:ok, source} ->
+        {:ok, source}
+
+      :miss ->
+        case fetch_source_from_db(key) do
+          {:ok, source} = result ->
+            SourceCache.cache_source(key, source)
+            result
+
+          error ->
+            error
+        end
+    end
+  end
+
+  defp fetch_source_from_db(key) do
     query =
       from s in Source,
         where: s.key == ^key and is_nil(s.revoked_at) and s.type == "http",
@@ -359,10 +379,18 @@ defmodule WhisperLogs.Accounts do
   @doc """
   Updates the last_used_at timestamp for a source.
   Called asynchronously from the auth plug.
+
+  Throttled to once per 15s per source to reduce database writes during high-volume ingestion.
   """
   def touch_source(%Source{id: id}) do
-    from(s in Source, where: s.id == ^id)
-    |> Repo.update_all(set: [last_used_at: DateTime.utc_now(:second)])
+    if SourceCache.should_touch?(id) do
+      SourceCache.mark_touched(id)
+
+      from(s in Source, where: s.id == ^id)
+      |> Repo.update_all(set: [last_used_at: DateTime.utc_now(:second)])
+    else
+      :ok
+    end
   end
 
   @doc """

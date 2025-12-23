@@ -12,8 +12,12 @@ defmodule WhisperLogs.Application do
       WhisperLogs.Repo,
       {DNSCluster, query: Application.get_env(:whisperlogs, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
+      # ETS cache for source auth (must start before Endpoint)
+      WhisperLogs.SourceCache,
       # Log retention cleanup
       WhisperLogs.Retention,
+      # Alert evaluation
+      WhisperLogs.Alerts.Evaluator,
       # Syslog listener infrastructure
       WhisperLogs.Syslog.Supervisor,
       # Start to serve requests, typically the last entry

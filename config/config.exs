@@ -29,6 +29,13 @@ config :whisperlogs,
 # When allow_public is false, registration closes after first user is created
 config :whisperlogs, :registration, allow_public: false
 
+# Source cache settings (ETS-based caching to reduce DB load during log ingestion)
+config :whisperlogs, WhisperLogs.SourceCache,
+  # How long to cache source lookups (seconds) - affects revocation delay
+  source_ttl: 15,
+  # How often to update last_used_at in DB (seconds) - purely informational
+  touch_ttl: 300
+
 # Configure the endpoint
 config :whisperlogs, WhisperLogsWeb.Endpoint,
   url: [host: "localhost"],

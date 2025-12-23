@@ -207,6 +207,49 @@ defmodule WhisperLogs.Logs do
     end
   end
 
+  @doc """
+  Applies parsed search tokens to a query.
+  Used by the alert evaluator to reuse search logic.
+  """
+  def apply_search_tokens(query, tokens) when is_list(tokens) do
+    Enum.reduce(tokens, query, &apply_search_token/2)
+  end
+
+  @doc """
+  Counts logs matching a search query within a time window.
+
+  Returns the count, or 0 if the query is invalid/empty.
+
+  ## Examples
+
+      count_matches("level:error", 3600)  # errors in past hour
+      count_matches("user_id:123", 86400) # logs for user in past 24h
+  """
+  def count_matches(search_query, window_seconds) when is_binary(search_query) do
+    cutoff = DateTime.add(DateTime.utc_now(), -window_seconds, :second)
+
+    case SearchParser.parse(search_query) do
+      {:ok, []} ->
+        0
+
+      {:ok, tokens} ->
+        Log
+        |> where([l], l.timestamp >= ^cutoff)
+        |> apply_search_tokens(tokens)
+        |> Repo.aggregate(:count, :id)
+    end
+  end
+
+  def count_matches(_, _), do: 0
+
+  @doc """
+  Returns the current maximum log ID, or nil if no logs exist.
+  Used to set the baseline for new alerts to prevent retroactive triggering.
+  """
+  def max_log_id do
+    Repo.aggregate(Log, :max, :id)
+  end
+
   # Plain term: search message OR any metadata value
   defp apply_search_token({:term, term}, query) do
     pattern = SearchParser.escape_like(term)
