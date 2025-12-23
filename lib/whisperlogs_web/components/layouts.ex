@@ -50,13 +50,13 @@ defmodule WhisperLogsWeb.Layouts do
               <nav class="flex items-center gap-0.5">
                 <.link
                   navigate={~p"/"}
-                  class="px-2 py-1 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Logs
                 </.link>
                 <.link
                   navigate={~p"/api-keys"}
-                  class="px-2 py-1 rounded text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   API Keys
                 </.link>

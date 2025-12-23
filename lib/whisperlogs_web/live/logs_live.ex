@@ -106,7 +106,7 @@ defmodule WhisperLogsWeb.LogsLive do
               class="group hover:bg-bg-elevated/50 cursor-pointer transition-colors"
               phx-click={JS.toggle(to: "##{dom_id}-details")}
             >
-              <div class="px-4 py-1.5 flex items-center gap-3 font-mono text-xs">
+              <div class="px-4 py-1 flex items-center gap-3 font-mono text-xs">
                 <%!-- Timestamp --%>
                 <span class="flex-shrink-0 text-text-tertiary text-xs tabular-nums">
                   {format_timestamp(log.timestamp)}
@@ -117,7 +117,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   "flex-shrink-0 px-2 py-0.5 rounded text-xs font-semibold uppercase tracking-wide",
                   level_badge(log.level)
                 ]}>
-                  {String.slice(log.level, 0, 3)}
+                  {level_abbrev(log.level)}
                 </span>
 
                 <%!-- Source --%>
@@ -229,7 +229,7 @@ defmodule WhisperLogsWeb.LogsLive do
                 value={@filters.search}
                 phx-debounce="300"
                 placeholder="Search messages..."
-                class="w-full bg-bg-surface border border-border-default rounded-lg pl-9 pr-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary transition-colors"
+                class="w-full bg-bg-surface border border-border-default rounded-lg pl-9 pr-3 py-1.5 text-smaller text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-text-tertiary transition-colors"
               />
             </div>
 
@@ -259,7 +259,7 @@ defmodule WhisperLogsWeb.LogsLive do
             <%= if @sources != [] do %>
               <select
                 name="source"
-                class="bg-bg-surface border border-border-default rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:border-text-tertiary"
+                class="bg-bg-surface border border-border-default rounded-lg px-3 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary"
               >
                 <option value="">All sources</option>
                 <option
@@ -277,17 +277,17 @@ defmodule WhisperLogsWeb.LogsLive do
               type="button"
               phx-click="toggle_live_tail"
               class={[
-                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border",
+                "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border",
                 @live_tail && "bg-accent-purple border-accent-purple text-white",
                 !@live_tail &&
                   "bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
               ]}
             >
               <%= if @live_tail do %>
-                <span class="relative flex h-1.5 w-1.5">
-                  <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75">
-                  </span>
-                  <span class="relative inline-flex rounded-full h-1.5 w-1.5 bg-white"></span>
+                <span class="relative flex size-2">
+                  <span class="live-wave absolute inset-0 rounded-full bg-white"></span>
+                  <span class="live-wave-delayed absolute inset-0 rounded-full bg-white"></span>
+                  <span class="relative inline-flex rounded-full size-2 bg-white"></span>
                 </span>
               <% else %>
                 <.icon name="hero-pause" class="size-3.5" />
@@ -299,7 +299,7 @@ defmodule WhisperLogsWeb.LogsLive do
             <button
               type="button"
               phx-click="clear_filters"
-              class="px-3 py-1.5 rounded-lg text-xs font-medium text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
+              class="px-3 py-1.5 rounded-lg text-smaller font-medium text-text-tertiary hover:text-text-primary hover:bg-bg-surface transition-colors"
             >
               Clear
             </button>
@@ -652,6 +652,13 @@ defmodule WhisperLogsWeb.LogsLive do
   defp level_filter_bg("warning"), do: "bg-amber-500/20 border-amber-500/50 text-amber-400"
   defp level_filter_bg("error"), do: "bg-red-500/20 border-red-500/50 text-red-400"
   defp level_filter_bg(_), do: "bg-bg-muted border-border-default text-text-secondary"
+
+  # Level abbreviations
+  defp level_abbrev("debug"), do: "DEBG"
+  defp level_abbrev("info"), do: "INFO"
+  defp level_abbrev("warning"), do: "WARN"
+  defp level_abbrev("error"), do: "EROR"
+  defp level_abbrev(level), do: String.upcase(String.slice(level, 0, 4))
 
   # Log entry badge styling
   defp level_badge("debug"), do: "bg-bg-muted text-text-tertiary"
