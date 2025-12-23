@@ -20,12 +20,20 @@ defmodule WhisperLogs.Logs do
 
     entries =
       Enum.map(logs, fn log ->
+        base_metadata = log["metadata"] || %{}
+
+        metadata =
+          if request_id = log["request_id"] do
+            Map.put(base_metadata, "request_id", request_id)
+          else
+            base_metadata
+          end
+
         %{
           timestamp: parse_timestamp(log["timestamp"]) || now,
           level: normalize_level(log["level"]),
           message: log["message"] || "",
-          metadata: log["metadata"] || %{},
-          request_id: log["request_id"],
+          metadata: metadata,
           source: source,
           inserted_at: now
         }
@@ -39,7 +47,6 @@ defmodule WhisperLogs.Logs do
           :level,
           :message,
           :metadata,
-          :request_id,
           :source,
           :inserted_at
         ]
@@ -199,7 +206,10 @@ defmodule WhisperLogs.Logs do
 
   defp filter_request_id(query, nil), do: query
   defp filter_request_id(query, ""), do: query
-  defp filter_request_id(query, request_id), do: where(query, [l], l.request_id == ^request_id)
+
+  defp filter_request_id(query, request_id) do
+    where(query, [l], fragment("?->>'request_id' = ?", l.metadata, ^request_id))
+  end
 
   @doc """
   Gets a single log by ID.

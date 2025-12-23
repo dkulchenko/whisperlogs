@@ -143,14 +143,9 @@ defmodule WhisperLogsWeb.LogsLive do
                 <%!-- Message + Metadata --%>
                 <span class="flex-1 break-all leading-relaxed">
                   <span class="text-text-primary whitespace-pre-wrap">{log.message}</span>
-                  <%= if log.request_id || log.metadata != %{} do %>
+                  <%= if log.metadata != %{} do %>
                     <span class="text-text-tertiary ml-2">
-                      <%= if log.request_id do %>
-                        <span class="text-purple-400">request_id</span><span class="text-text-tertiary">=</span><span class="text-purple-300">{log.request_id}</span>
-                      <% end %>
-                      <span :for={{key, value} <- log.metadata}>
-                        <span class="text-blue-400 ml-2">{key}</span><span class="text-text-tertiary">=</span><span class="text-blue-300">{format_metadata_value(value)}</span>
-                      </span>
+                      <span :for={{key, value} <- log.metadata} class="ml-2" phx-no-format><span class={if(key == "request_id", do: "text-purple-400", else: "text-blue-400")}>{key}</span><span class="text-text-tertiary">=</span><span class={if(key == "request_id", do: "text-purple-300", else: "text-blue-300")}>{format_metadata_value(value)}</span></span>
                     </span>
                   <% end %>
                 </span>
@@ -211,18 +206,20 @@ defmodule WhisperLogsWeb.LogsLive do
 
                   <%!-- Actions --%>
                   <div class="flex items-center gap-2">
-                    <%= if log.request_id do %>
+                    <%= if log.metadata["request_id"] do %>
                       <button
                         type="button"
                         phx-click="filter-by-request-id"
-                        phx-value-request_id={log.request_id}
+                        phx-value-request_id={log.metadata["request_id"]}
                         class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors"
                       >
                         <.icon name="hero-funnel" class="size-3.5" /> Filter by request
                       </button>
                       <button
                         type="button"
-                        phx-click={JS.dispatch("whisperlogs:copy", detail: %{text: log.request_id})}
+                        phx-click={
+                          JS.dispatch("whisperlogs:copy", detail: %{text: log.metadata["request_id"]})
+                        }
                         class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-bg-muted text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
                       >
                         <.icon name="hero-clipboard-document" class="size-3.5" /> Copy request ID
@@ -941,7 +938,6 @@ defmodule WhisperLogsWeb.LogsLive do
       level: log.level,
       message: log.message,
       source: log.source,
-      request_id: log.request_id,
       metadata: log.metadata
     }
     |> Jason.encode!(pretty: true)
