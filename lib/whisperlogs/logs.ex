@@ -6,6 +6,7 @@ defmodule WhisperLogs.Logs do
   import Ecto.Query, warn: false
   alias WhisperLogs.Repo
   alias WhisperLogs.Logs.Log
+  alias WhisperLogs.Logs.SearchParser
 
   @pubsub WhisperLogs.PubSub
   @topic "logs"
@@ -200,8 +201,70 @@ defmodule WhisperLogs.Logs do
   defp filter_search(query, ""), do: query
 
   defp filter_search(query, search) do
-    search_term = "%#{search}%"
-    where(query, [l], ilike(l.message, ^search_term))
+    case SearchParser.parse(search) do
+      {:ok, []} -> query
+      {:ok, tokens} -> Enum.reduce(tokens, query, &apply_search_token/2)
+    end
+  end
+
+  # Plain term: search message OR any metadata value
+  defp apply_search_token({:term, term}, query) do
+    pattern = SearchParser.escape_like(term)
+
+    where(
+      query,
+      [l],
+      ilike(l.message, ^pattern) or
+        fragment("?::text ILIKE ?", l.metadata, ^pattern)
+    )
+  end
+
+  # Quoted phrase: same as term but preserves spaces
+  defp apply_search_token({:phrase, phrase}, query) do
+    pattern = SearchParser.escape_like(phrase)
+
+    where(
+      query,
+      [l],
+      ilike(l.message, ^pattern) or
+        fragment("?::text ILIKE ?", l.metadata, ^pattern)
+    )
+  end
+
+  # Exclude term: NOT in message AND NOT in metadata
+  defp apply_search_token({:exclude, term}, query) do
+    pattern = SearchParser.escape_like(term)
+
+    where(
+      query,
+      [l],
+      not ilike(l.message, ^pattern) and
+        not fragment("?::text ILIKE ?", l.metadata, ^pattern)
+    )
+  end
+
+  # Metadata key:value filter
+  defp apply_search_token({:metadata, key, value}, query) do
+    pattern = SearchParser.escape_like(value)
+    where(query, [l], fragment("?->>? ILIKE ?", l.metadata, ^key, ^pattern))
+  end
+
+  # Exclude metadata key:value
+  defp apply_search_token({:exclude_metadata, key, value}, query) do
+    pattern = SearchParser.escape_like(value)
+
+    where(
+      query,
+      [l],
+      fragment(
+        "(?->>? IS NULL OR ?->>? NOT ILIKE ?)",
+        l.metadata,
+        ^key,
+        l.metadata,
+        ^key,
+        ^pattern
+      )
+    )
   end
 
   defp filter_request_id(query, nil), do: query

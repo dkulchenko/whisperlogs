@@ -3,6 +3,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
   alias Phoenix.LiveView.JS
   alias WhisperLogs.Logs
+  alias WhisperLogs.Logs.SearchParser
 
   @per_page 100
   @max_logs @per_page * 5
@@ -145,7 +146,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   <span class="text-text-primary whitespace-pre-wrap">{log.message}</span>
                   <%= if log.metadata != %{} do %>
                     <span class="text-text-tertiary ml-2">
-                      <span :for={{key, value} <- log.metadata} class="ml-2" phx-no-format><span class={if(key == "request_id", do: "text-purple-400", else: "text-blue-400")}>{key}</span><span class="text-text-tertiary">=</span><span class={if(key == "request_id", do: "text-purple-300", else: "text-blue-300")}>{format_metadata_value(value)}</span></span>
+                      <span :for={{key, value} <- log.metadata} class="ml-2" phx-no-format><span class={if(key == "request_id", do: "text-purple-400", else: "text-blue-400")}>{key}</span><span class="text-text-tertiary">:</span><span class={if(key == "request_id", do: "text-purple-300", else: "text-blue-300")}>{format_metadata_value(value)}</span></span>
                     </span>
                   <% end %>
                 </span>
@@ -273,30 +274,150 @@ defmodule WhisperLogsWeb.LogsLive do
         >
           <div class="flex items-center gap-4">
             <%!-- Search with time range --%>
-            <div class="relative flex-1 flex items-center bg-bg-surface border border-border-default rounded-lg focus-within:border-text-tertiary transition-colors">
-              <.icon
-                name="hero-magnifying-glass"
-                class="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-text-tertiary"
-              />
-              <input
-                type="text"
-                name="search"
-                value={@filters.search}
-                phx-debounce="300"
-                placeholder="Search messages..."
-                class="flex-1 bg-transparent pl-9 pr-2 py-1.5 text-smaller text-text-primary placeholder:text-text-tertiary focus:outline-none"
-              />
-              <select
-                name="time_range"
-                class="bg-transparent border-l border-border-default px-2 py-1.5 text-smaller text-text-secondary focus:outline-none cursor-pointer"
+            <div class="relative flex-1">
+              <div class="flex items-center bg-bg-surface border border-border-default rounded-lg focus-within:border-text-tertiary transition-colors">
+                <.icon
+                  name="hero-magnifying-glass"
+                  class="ml-3 size-4 text-text-tertiary shrink-0"
+                />
+                <%!-- Search input wrapper with overlay --%>
+                <div class="relative flex-1">
+                  <%!-- Syntax highlight overlay --%>
+                  <div
+                    id="search-highlight-overlay"
+                    phx-update="ignore"
+                    class="absolute inset-0 pl-2 py-1.5 text-smaller font-mono whitespace-pre pointer-events-none overflow-hidden leading-normal"
+                    aria-hidden="true"
+                  >
+                  </div>
+                  <%!-- Actual input with transparent text --%>
+                  <input
+                    type="text"
+                    name="search"
+                    id="search-input"
+                    value={@filters.search}
+                    phx-debounce="300"
+                    phx-hook=".SearchHighlight"
+                    placeholder="Search... (key:value -exclude 'phrase')"
+                    class="w-full bg-transparent pl-2 pr-1 py-1.5 text-smaller text-transparent caret-text-primary placeholder:text-text-tertiary focus:outline-none font-mono"
+                    autocomplete="off"
+                    autocorrect="off"
+                    autocapitalize="off"
+                    spellcheck="false"
+                  />
+                </div>
+                <%!-- Help button --%>
+                <button
+                  type="button"
+                  phx-click={JS.toggle(to: "#search-help-popover")}
+                  class="p-1.5 rounded hover:bg-bg-muted transition-colors shrink-0"
+                  aria-label="Search syntax help"
+                >
+                  <.icon
+                    name="hero-question-mark-circle"
+                    class="size-4 text-text-tertiary hover:text-text-secondary"
+                  />
+                </button>
+                <select
+                  name="time_range"
+                  class="bg-transparent border-l border-border-default px-2 py-1.5 text-smaller text-text-secondary focus:outline-none cursor-pointer shrink-0"
+                >
+                  <option value="3h" selected={@filters.time_range == "3h"}>Last 3h</option>
+                  <option value="12h" selected={@filters.time_range == "12h"}>Last 12h</option>
+                  <option value="24h" selected={@filters.time_range == "24h"}>Last 24h</option>
+                  <option value="7d" selected={@filters.time_range == "7d"}>Last 7d</option>
+                  <option value="30d" selected={@filters.time_range == "30d"}>Last 30d</option>
+                  <option value="all" selected={@filters.time_range == "all"}>All time</option>
+                </select>
+              </div>
+
+              <%!-- Search help popover --%>
+              <div
+                id="search-help-popover"
+                class="hidden absolute bottom-full left-0 mb-2 w-80 p-4 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50"
+                phx-click-away={JS.hide(to: "#search-help-popover")}
               >
-                <option value="3h" selected={@filters.time_range == "3h"}>Last 3h</option>
-                <option value="12h" selected={@filters.time_range == "12h"}>Last 12h</option>
-                <option value="24h" selected={@filters.time_range == "24h"}>Last 24h</option>
-                <option value="7d" selected={@filters.time_range == "7d"}>Last 7d</option>
-                <option value="30d" selected={@filters.time_range == "30d"}>Last 30d</option>
-                <option value="all" selected={@filters.time_range == "all"}>All time</option>
-              </select>
+                <div class="flex items-center justify-between mb-3">
+                  <h3 class="text-sm font-semibold text-text-primary">Search Syntax</h3>
+                  <button
+                    type="button"
+                    phx-click={JS.hide(to: "#search-help-popover")}
+                    class="p-1 rounded hover:bg-bg-muted transition-colors"
+                  >
+                    <.icon name="hero-x-mark" class="size-4 text-text-tertiary" />
+                  </button>
+                </div>
+
+                <div class="space-y-3 text-xs">
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-magnifying-glass" class="size-3.5 text-blue-400" />
+                      <span class="font-medium text-text-primary">Basic Search</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Search in messages and all metadata values
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded text-text-tertiary font-mono">
+                      connection error
+                    </code>
+                  </div>
+
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-key" class="size-3.5 text-purple-400" />
+                      <span class="font-medium text-text-primary">Metadata Filter</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Filter by specific metadata fields
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono">
+                      <span class="text-purple-400">user_id</span><span class="text-text-tertiary">:</span><span class="text-purple-300">123</span>
+                    </code>
+                  </div>
+
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-minus-circle" class="size-3.5 text-red-400" />
+                      <span class="font-medium text-text-primary">Exclude Terms</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Prefix with <span class="text-red-400">-</span> to exclude
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono">
+                      error <span class="text-red-400">-oban</span>
+                      <span class="text-red-400">-healthcheck</span>
+                    </code>
+                  </div>
+
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon
+                        name="hero-chat-bubble-bottom-center-text"
+                        class="size-3.5 text-amber-400"
+                      />
+                      <span class="font-medium text-text-primary">Exact Phrase</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Use quotes for exact phrase matching
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono">
+                      <span class="text-amber-400">"connection timeout"</span>
+                    </code>
+                  </div>
+
+                  <div class="pt-2 border-t border-border-subtle">
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-sparkles" class="size-3.5 text-accent-purple" />
+                      <span class="font-medium text-text-primary">Combined Example</span>
+                    </div>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono text-xs">
+                      <span class="text-purple-400">user_id</span>:<span class="text-purple-300">42</span>
+                      <span class="text-amber-400">"failed"</span>
+                      <span class="text-red-400">-retry</span>
+                    </code>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <%!-- Level filter --%>
@@ -387,7 +508,8 @@ defmodule WhisperLogsWeb.LogsLive do
               phx-click="toggle_live_tail"
               class={[
                 "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border",
-                @live_tail && "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20",
+                @live_tail &&
+                  "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20",
                 !@live_tail &&
                   "bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
               ]}
@@ -522,6 +644,122 @@ defmodule WhisperLogsWeb.LogsLive do
           }
           // NOTE: No flag resets here - callback handles it
           // NOTE: No setTimeout re-checks - direction check prevents loops
+        }
+      }
+    </script>
+
+    <script :type={Phoenix.LiveView.ColocatedHook} name=".SearchHighlight">
+      // Token patterns matching the Elixir parser
+      const TOKEN_PATTERNS = [
+        { type: 'exclude_metadata_quoted', regex: /-[\w.-]+:"[^"]*"/ },
+        { type: 'metadata_quoted', regex: /[\w.-]+:"[^"]*"/ },
+        { type: 'phrase', regex: /"[^"]*"/ },
+        { type: 'exclude_metadata', regex: /-[\w.-]+:[\w.-]+/ },
+        { type: 'metadata', regex: /[\w.-]+:[\w.-]+/ },
+        { type: 'exclude', regex: /-[\w.-]+/ },
+        { type: 'term', regex: /[\w.-]+/ }
+      ]
+
+      function highlightToken(token, type) {
+        const escaped = token.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+        switch (type) {
+          case 'phrase':
+            return `<span class="text-amber-400">${escaped}</span>`
+
+          case 'metadata':
+          case 'metadata_quoted':
+            const [key, ...valueParts] = token.split(':')
+            const value = valueParts.join(':')
+            return `<span class="text-purple-400">${key.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-purple-300">${value.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+
+          case 'exclude':
+            return `<span class="text-red-400">${escaped}</span>`
+
+          case 'exclude_metadata':
+          case 'exclude_metadata_quoted':
+            const content = token.slice(1) // remove leading -
+            const [eKey, ...eValueParts] = content.split(':')
+            const eValue = eValueParts.join(':')
+            return `<span class="text-red-400">-</span><span class="text-red-300">${eKey.replace(/</g, '&lt;')}</span><span class="text-text-tertiary">:</span><span class="text-red-300">${eValue.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+
+          case 'term':
+          default:
+            return `<span class="text-text-primary">${escaped}</span>`
+        }
+      }
+
+      function escapeHtml(text) {
+        return text
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+      }
+
+      function parseAndHighlight(text) {
+        if (!text) return ''
+
+        let result = ''
+        let lastIndex = 0
+
+        // Build a combined regex from all patterns
+        const combinedPattern = new RegExp(
+          TOKEN_PATTERNS.map(p => `(${p.regex.source})`).join('|'),
+          'g'
+        )
+
+        let match
+        while ((match = combinedPattern.exec(text)) !== null) {
+          // Add any whitespace/text before this match (preserve spaces)
+          if (match.index > lastIndex) {
+            const between = text.slice(lastIndex, match.index)
+            result += escapeHtml(between)
+          }
+
+          // Find which pattern matched
+          const matchedText = match[0]
+          let matchType = 'term'
+          for (let i = 0; i < TOKEN_PATTERNS.length; i++) {
+            if (match[i + 1] !== undefined) {
+              matchType = TOKEN_PATTERNS[i].type
+              break
+            }
+          }
+
+          result += highlightToken(matchedText, matchType)
+          lastIndex = match.index + matchedText.length
+        }
+
+        // Add any remaining text
+        if (lastIndex < text.length) {
+          result += escapeHtml(text.slice(lastIndex))
+        }
+
+        return result
+      }
+
+      export default {
+        mounted() {
+          this.overlay = document.getElementById('search-highlight-overlay')
+          this.updateHighlight()
+
+          this.el.addEventListener('input', () => this.updateHighlight())
+          this.el.addEventListener('focus', () => this.updateHighlight())
+        },
+
+        updated() {
+          this.updateHighlight()
+        },
+
+        updateHighlight() {
+          if (this.overlay) {
+            const value = this.el.value || ''
+            if (value === '') {
+              this.overlay.innerHTML = ''
+            } else {
+              this.overlay.innerHTML = parseAndHighlight(value)
+            }
+          }
         }
       }
     </script>
@@ -716,7 +954,7 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   def handle_event("filter-by-request-id", %{"request_id" => request_id}, socket) do
-    filters = %{socket.assigns.filters | search: request_id}
+    filters = %{socket.assigns.filters | search: "request_id:#{request_id}"}
 
     logs = fetch_logs(filters)
     {cursor_top, cursor_bottom} = extract_cursors(logs)
@@ -862,10 +1100,46 @@ defmodule WhisperLogsWeb.LogsLive do
     source_match = filters.source == "" or log.source == filters.source
 
     search_match =
-      filters.search == "" or
-        String.contains?(String.downcase(log.message), String.downcase(filters.search))
+      case SearchParser.parse(filters.search) do
+        {:ok, []} -> true
+        {:ok, tokens} -> Enum.all?(tokens, &log_matches_token?(log, &1))
+      end
 
     level_match and source_match and search_match
+  end
+
+  defp log_matches_token?(log, {:term, term}) do
+    term_lower = String.downcase(term)
+    message_match = String.contains?(String.downcase(log.message), term_lower)
+
+    metadata_match =
+      Enum.any?(log.metadata, fn {_k, v} ->
+        String.contains?(String.downcase(to_string(v)), term_lower)
+      end)
+
+    message_match or metadata_match
+  end
+
+  defp log_matches_token?(log, {:phrase, phrase}) do
+    log_matches_token?(log, {:term, phrase})
+  end
+
+  defp log_matches_token?(log, {:exclude, term}) do
+    not log_matches_token?(log, {:term, term})
+  end
+
+  defp log_matches_token?(log, {:metadata, key, value}) do
+    case Map.get(log.metadata, key) do
+      nil -> false
+      v -> String.contains?(String.downcase(to_string(v)), String.downcase(value))
+    end
+  end
+
+  defp log_matches_token?(log, {:exclude_metadata, key, value}) do
+    case Map.get(log.metadata, key) do
+      nil -> true
+      v -> not String.contains?(String.downcase(to_string(v)), String.downcase(value))
+    end
   end
 
   defp level_selected?(levels, level), do: level in levels
@@ -894,7 +1168,9 @@ defmodule WhisperLogsWeb.LogsLive do
   defp format_timestamp(dt) do
     # Convert UTC to PST/PDT (America/Los_Angeles)
     local_dt = DateTime.shift_zone!(dt, "America/Los_Angeles")
-    Calendar.strftime(local_dt, "%m/%d %H:%M:%S.") <> format_milliseconds(local_dt)
+
+    Calendar.strftime(local_dt, "%m/%d %I:%M:%S.") <>
+      format_milliseconds(local_dt) <> Calendar.strftime(local_dt, " %P")
   end
 
   defp format_full_timestamp(dt) do
