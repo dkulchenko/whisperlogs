@@ -102,7 +102,11 @@ defmodule WhisperLogs.AccountsTest do
       password = valid_user_password()
 
       {:error, changeset} =
-        Accounts.register_user(%{email: email, password: password, password_confirmation: password})
+        Accounts.register_user(%{
+          email: email,
+          password: password,
+          password_confirmation: password
+        })
 
       assert "has already been taken" in errors_on(changeset).email
 

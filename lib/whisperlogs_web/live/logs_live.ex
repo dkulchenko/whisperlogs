@@ -27,6 +27,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:filters, filters)
      |> assign(:live_tail, true)
      |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
      |> assign(:cursor_top, cursor_top)
      |> assign(:cursor_bottom, cursor_bottom)
      |> assign(:has_older?, has_older?)
@@ -202,7 +203,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
         <%!-- Jump to latest button - positioned outside scrollable area --%>
         <button
-          :if={@has_newer?}
+          :if={@far_from_bottom? or @has_newer?}
           phx-click="jump-to-latest"
           class="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-accent-purple text-white text-xs font-medium rounded-full shadow-lg hover:bg-accent-purple/90 transition-colors"
         >
@@ -311,6 +312,7 @@ defmodule WhisperLogsWeb.LogsLive do
     <script :type={Phoenix.LiveView.ColocatedHook} name=".InfiniteScroll">
       const LOAD_THRESHOLD_PERCENT = 0.25  // load when within 25% of edge
       const BOTTOM_THRESHOLD = 100         // pixels from bottom to be considered "at bottom"
+      const JUMP_BUTTON_THRESHOLD = 2800   // ~100 rows * 28px - show "Jump to latest" button
 
       export default {
         mounted() {
@@ -318,6 +320,8 @@ defmodule WhisperLogsWeb.LogsLive do
           this.loadingNewer = false
           this.isNearBottom = true
           this.wasNearBottom = true
+          this.isFarFromBottom = false
+          this.wasFarFromBottom = false
           this.lastScrollTop = this.el.scrollTop
 
           this.el.addEventListener("scroll", () => {
@@ -329,8 +333,11 @@ defmodule WhisperLogsWeb.LogsLive do
             const isScrollingDown = scrollTop > this.lastScrollTop
             this.lastScrollTop = scrollTop
 
-            // Near-bottom tracking for live tail
+            // Near-bottom tracking for live tail (auto-scroll)
             this.isNearBottom = distanceFromBottom < BOTTOM_THRESHOLD
+
+            // Far-from-bottom tracking for "Jump to latest" button
+            this.isFarFromBottom = distanceFromBottom > JUMP_BUTTON_THRESHOLD
 
             // Notify server when scroll position changes relative to bottom
             if (!this.isNearBottom && this.wasNearBottom) {
@@ -339,6 +346,14 @@ defmodule WhisperLogsWeb.LogsLive do
               this.pushEvent("scroll-to-bottom", {})
             }
             this.wasNearBottom = this.isNearBottom
+
+            // Notify server when far from bottom changes (for jump button visibility)
+            if (this.isFarFromBottom && !this.wasFarFromBottom) {
+              this.pushEvent("far-from-bottom", {})
+            } else if (!this.isFarFromBottom && this.wasFarFromBottom) {
+              this.pushEvent("near-bottom", {})
+            }
+            this.wasFarFromBottom = this.isFarFromBottom
 
             // Calculate scroll position as percentage of total scrollable area
             const maxScroll = scrollHeight - clientHeight
@@ -373,6 +388,8 @@ defmodule WhisperLogsWeb.LogsLive do
             this.el.scrollTop = this.el.scrollHeight
             this.isNearBottom = true
             this.wasNearBottom = true
+            this.isFarFromBottom = false
+            this.wasFarFromBottom = false
             this.lastScrollTop = this.el.scrollTop
           })
 
@@ -424,6 +441,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_older?, has_older?)
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
      |> stream(:logs, logs, reset: true)}
   end
 
@@ -445,6 +463,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_older?, has_older?)
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
      |> stream(:logs, logs, reset: true)}
   end
 
@@ -546,6 +565,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_older?, has_older?)
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
      |> stream(:logs, logs, reset: true)
      |> push_event("force-scroll-bottom", %{})}
   end
@@ -556,6 +576,14 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("scroll-to-bottom", _params, socket) do
     {:noreply, assign(socket, :at_bottom?, true)}
+  end
+
+  def handle_event("far-from-bottom", _params, socket) do
+    {:noreply, assign(socket, :far_from_bottom?, true)}
+  end
+
+  def handle_event("near-bottom", _params, socket) do
+    {:noreply, assign(socket, :far_from_bottom?, false)}
   end
 
   def handle_event("view-in-context", %{"id" => id, "timestamp" => timestamp_str}, socket) do
