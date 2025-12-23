@@ -377,6 +377,38 @@ defmodule WhisperLogs.Accounts do
   end
 
   @doc """
+  Updates an HTTP source (name only).
+  """
+  def update_http_source(%Source{type: "http"} = source, attrs) do
+    source
+    |> Source.update_http_changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Updates a syslog source.
+  Restarts the listener if port or transport changes.
+  """
+  def update_syslog_source(%Source{type: "syslog"} = source, attrs) do
+    old_port = source.port
+    old_transport = source.transport
+
+    case source |> Source.update_syslog_changeset(attrs) |> Repo.update() do
+      {:ok, updated} ->
+        # Restart listener if port or transport changed
+        if updated.port != old_port or updated.transport != old_transport do
+          WhisperLogs.Syslog.Supervisor.stop_listener(updated.id)
+          WhisperLogs.Syslog.Supervisor.start_listener(updated)
+        end
+
+        {:ok, updated}
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
   Updates the last_used_at timestamp for a source.
   Called asynchronously from the auth plug.
 

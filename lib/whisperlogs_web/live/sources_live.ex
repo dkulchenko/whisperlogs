@@ -14,6 +14,7 @@ defmodule WhisperLogsWeb.SourcesLive do
      |> assign(:page_title, "Sources")
      |> assign(:sources, sources)
      |> assign(:revealed_key_id, nil)
+     |> assign(:editing_source, nil)
      |> assign(:http_form, to_form(%{"name" => "", "source" => ""}))
      |> assign(
        :syslog_form,
@@ -42,12 +43,19 @@ defmodule WhisperLogsWeb.SourcesLive do
 
         <div class="mt-8 grid gap-6 lg:grid-cols-2">
           <%!-- HTTP Source Form --%>
-          <div class="bg-bg-elevated border border-border-default rounded-lg p-6">
+          <div
+            :if={@editing_source == nil || @editing_source.type == "http"}
+            class="bg-bg-elevated border border-border-default rounded-lg p-6"
+          >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-globe-alt" class="size-5 text-accent-purple" />
-              <h3 class="text-lg font-semibold text-text-primary">HTTP Source</h3>
+              <h3 class="text-lg font-semibold text-text-primary">
+                {if @editing_source && @editing_source.type == "http",
+                  do: "Edit HTTP Source",
+                  else: "HTTP Source"}
+              </h3>
             </div>
-            <.form for={@http_form} id="http-source-form" phx-submit="create_http" class="space-y-4">
+            <.form for={@http_form} id="http-source-form" phx-submit="save_http" class="space-y-4">
               <.input
                 field={@http_form[:name]}
                 type="text"
@@ -59,24 +67,49 @@ defmodule WhisperLogsWeb.SourcesLive do
                 type="text"
                 label="Source ID"
                 placeholder="e.g., my-app-prod"
+                disabled={@editing_source != nil}
               />
-              <p class="text-sm text-text-tertiary">
+              <p :if={@editing_source == nil} class="text-sm text-text-tertiary">
                 Use the generated API key with POST /api/v1/logs
               </p>
-              <.button variant="primary" phx-disable-with="Creating...">Create HTTP Source</.button>
+              <div class="flex gap-3">
+                <.button
+                  variant="primary"
+                  phx-disable-with={if @editing_source, do: "Saving...", else: "Creating..."}
+                >
+                  {if @editing_source && @editing_source.type == "http",
+                    do: "Save Changes",
+                    else: "Create HTTP Source"}
+                </.button>
+                <button
+                  :if={@editing_source && @editing_source.type == "http"}
+                  type="button"
+                  phx-click="cancel_edit"
+                  class="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </.form>
           </div>
 
           <%!-- Syslog Source Form --%>
-          <div class="bg-bg-elevated border border-border-default rounded-lg p-6">
+          <div
+            :if={@editing_source == nil || @editing_source.type == "syslog"}
+            class="bg-bg-elevated border border-border-default rounded-lg p-6"
+          >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-server" class="size-5 text-accent-purple" />
-              <h3 class="text-lg font-semibold text-text-primary">Syslog Source</h3>
+              <h3 class="text-lg font-semibold text-text-primary">
+                {if @editing_source && @editing_source.type == "syslog",
+                  do: "Edit Syslog Source",
+                  else: "Syslog Source"}
+              </h3>
             </div>
             <.form
               for={@syslog_form}
               id="syslog-source-form"
-              phx-submit="create_syslog"
+              phx-submit="save_syslog"
               class="space-y-4"
             >
               <.input
@@ -90,6 +123,7 @@ defmodule WhisperLogsWeb.SourcesLive do
                 type="text"
                 label="Source ID"
                 placeholder="e.g., network-logs"
+                disabled={@editing_source != nil}
               />
               <div class="grid grid-cols-2 gap-3">
                 <.input field={@syslog_form[:port]} type="number" label="Port" min="1024" max="65535" />
@@ -105,10 +139,27 @@ defmodule WhisperLogsWeb.SourcesLive do
                 type="checkbox"
                 label="Accept from any host"
               />
-              <p class="text-sm text-text-tertiary">
+              <p :if={@editing_source == nil} class="text-sm text-text-tertiary">
                 Supports RFC 3164 and RFC 5424 formats
               </p>
-              <.button variant="primary" phx-disable-with="Creating...">Create Syslog Source</.button>
+              <div class="flex gap-3">
+                <.button
+                  variant="primary"
+                  phx-disable-with={if @editing_source, do: "Saving...", else: "Creating..."}
+                >
+                  {if @editing_source && @editing_source.type == "syslog",
+                    do: "Save Changes",
+                    else: "Create Syslog Source"}
+                </.button>
+                <button
+                  :if={@editing_source && @editing_source.type == "syslog"}
+                  type="button"
+                  phx-click="cancel_edit"
+                  class="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
             </.form>
           </div>
         </div>
@@ -165,6 +216,14 @@ defmodule WhisperLogsWeb.SourcesLive do
                   </div>
                 </div>
                 <div class="flex items-center gap-2">
+                  <button
+                    type="button"
+                    phx-click="edit_source"
+                    phx-value-id={source.id}
+                    class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
+                  >
+                    Edit
+                  </button>
                   <%= if source.type == "http" do %>
                     <button
                       type="button"
@@ -214,67 +273,190 @@ defmodule WhisperLogsWeb.SourcesLive do
   end
 
   @impl true
-  def handle_event("create_http", %{"name" => name, "source" => source}, socket) do
+  def handle_event("save_http", params, socket) do
     user = socket.assigns.current_scope.user
-    attrs = %{name: name, source: source}
+    name = params["name"]
 
-    case Accounts.create_http_source(user, attrs) do
-      {:ok, new_source} ->
-        {:noreply,
-         socket
-         |> assign(:sources, [new_source | socket.assigns.sources])
-         |> assign(:revealed_key_id, new_source.id)
-         |> assign(:http_form, to_form(%{"name" => "", "source" => ""}))}
+    if socket.assigns.editing_source && socket.assigns.editing_source.type == "http" do
+      # Update mode
+      case Accounts.update_http_source(socket.assigns.editing_source, %{name: name}) do
+        {:ok, updated_source} ->
+          sources =
+            Enum.map(socket.assigns.sources, fn s ->
+              if s.id == updated_source.id, do: updated_source, else: s
+            end)
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, format_errors(changeset))
-         |> assign(:http_form, to_form(changeset))}
+          {:noreply,
+           socket
+           |> assign(:sources, sources)
+           |> assign(:editing_source, nil)
+           |> assign(:http_form, to_form(%{"name" => "", "source" => ""}))
+           |> put_flash(:info, "Source updated successfully")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))
+           |> assign(:http_form, to_form(changeset))}
+      end
+    else
+      # Create mode
+      attrs = %{name: name, source: params["source"]}
+
+      case Accounts.create_http_source(user, attrs) do
+        {:ok, new_source} ->
+          {:noreply,
+           socket
+           |> assign(:sources, [new_source | socket.assigns.sources])
+           |> assign(:revealed_key_id, new_source.id)
+           |> assign(:http_form, to_form(%{"name" => "", "source" => ""}))}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))
+           |> assign(:http_form, to_form(changeset))}
+      end
     end
   end
 
-  def handle_event("create_syslog", params, socket) do
+  def handle_event("save_syslog", params, socket) do
     user = socket.assigns.current_scope.user
 
-    attrs = %{
-      name: params["name"],
-      source: params["source"],
-      port: String.to_integer(params["port"]),
-      transport: params["transport"],
-      auto_register_hosts: params["auto_register_hosts"] == "true"
-    }
+    if socket.assigns.editing_source && socket.assigns.editing_source.type == "syslog" do
+      # Update mode
+      attrs = %{
+        name: params["name"],
+        port: String.to_integer(params["port"]),
+        transport: params["transport"],
+        auto_register_hosts: params["auto_register_hosts"] == "true"
+      }
 
-    case Accounts.create_syslog_source(user, attrs) do
-      {:ok, new_source} ->
-        next_port = Accounts.next_available_syslog_port()
+      case Accounts.update_syslog_source(socket.assigns.editing_source, attrs) do
+        {:ok, updated_source} ->
+          sources =
+            Enum.map(socket.assigns.sources, fn s ->
+              if s.id == updated_source.id, do: updated_source, else: s
+            end)
 
-        {:noreply,
-         socket
-         |> assign(:sources, [new_source | socket.assigns.sources])
-         |> assign(
-           :syslog_form,
-           to_form(%{
-             "name" => "",
-             "source" => "",
-             "port" => to_string(next_port),
-             "transport" => "udp",
-             "auto_register_hosts" => "true"
-           })
-         )
-         |> put_flash(:info, "Syslog source created. Listening on port #{new_source.port}.")}
+          next_port = Accounts.next_available_syslog_port()
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, format_errors(changeset))
-         |> assign(:syslog_form, to_form(changeset))}
+          {:noreply,
+           socket
+           |> assign(:sources, sources)
+           |> assign(:editing_source, nil)
+           |> assign(
+             :syslog_form,
+             to_form(%{
+               "name" => "",
+               "source" => "",
+               "port" => to_string(next_port),
+               "transport" => "udp",
+               "auto_register_hosts" => "true"
+             })
+           )
+           |> put_flash(:info, "Source updated successfully")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))
+           |> assign(:syslog_form, to_form(changeset))}
+      end
+    else
+      # Create mode
+      attrs = %{
+        name: params["name"],
+        source: params["source"],
+        port: String.to_integer(params["port"]),
+        transport: params["transport"],
+        auto_register_hosts: params["auto_register_hosts"] == "true"
+      }
+
+      case Accounts.create_syslog_source(user, attrs) do
+        {:ok, new_source} ->
+          next_port = Accounts.next_available_syslog_port()
+
+          {:noreply,
+           socket
+           |> assign(:sources, [new_source | socket.assigns.sources])
+           |> assign(
+             :syslog_form,
+             to_form(%{
+               "name" => "",
+               "source" => "",
+               "port" => to_string(next_port),
+               "transport" => "udp",
+               "auto_register_hosts" => "true"
+             })
+           )
+           |> put_flash(:info, "Syslog source created. Listening on port #{new_source.port}.")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))
+           |> assign(:syslog_form, to_form(changeset))}
+      end
     end
   end
 
   def handle_event("toggle_reveal", %{"id" => id}, socket) do
     new_id = if socket.assigns.revealed_key_id == id, do: nil, else: id
     {:noreply, assign(socket, :revealed_key_id, new_id)}
+  end
+
+  def handle_event("edit_source", %{"id" => id}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Accounts.get_source(user, id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Source not found")}
+
+      %{type: "http"} = source ->
+        form_data = %{
+          "name" => source.name,
+          "source" => source.source
+        }
+
+        {:noreply,
+         socket
+         |> assign(:editing_source, source)
+         |> assign(:http_form, to_form(form_data))}
+
+      %{type: "syslog"} = source ->
+        form_data = %{
+          "name" => source.name,
+          "source" => source.source,
+          "port" => to_string(source.port),
+          "transport" => source.transport,
+          "auto_register_hosts" => to_string(source.auto_register_hosts)
+        }
+
+        {:noreply,
+         socket
+         |> assign(:editing_source, source)
+         |> assign(:syslog_form, to_form(form_data))}
+    end
+  end
+
+  def handle_event("cancel_edit", _, socket) do
+    next_port = Accounts.next_available_syslog_port()
+
+    {:noreply,
+     socket
+     |> assign(:editing_source, nil)
+     |> assign(:http_form, to_form(%{"name" => "", "source" => ""}))
+     |> assign(
+       :syslog_form,
+       to_form(%{
+         "name" => "",
+         "source" => "",
+         "port" => to_string(next_port),
+         "transport" => "udp",
+         "auto_register_hosts" => "true"
+       })
+     )}
   end
 
   def handle_event("revoke", %{"id" => id}, socket) do

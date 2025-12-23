@@ -14,6 +14,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
      |> assign(:channels, channels)
      |> assign(:show_email_form, false)
      |> assign(:show_pushover_form, false)
+     |> assign(:editing_channel, nil)
      |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
      |> assign(
        :pushover_form,
@@ -66,9 +67,13 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         >
           <div class="flex items-center gap-2 mb-4">
             <.icon name="hero-envelope" class="size-5 text-accent-purple" />
-            <h3 class="text-lg font-semibold text-text-primary">New Email Channel</h3>
+            <h3 class="text-lg font-semibold text-text-primary">
+              {if @editing_channel && @editing_channel.channel_type == "email",
+                do: "Edit Email Channel",
+                else: "New Email Channel"}
+            </h3>
           </div>
-          <.form for={@email_form} id="email-channel-form" phx-submit="create_email" class="space-y-4">
+          <.form for={@email_form} id="email-channel-form" phx-submit="save_email" class="space-y-4">
             <.input
               field={@email_form[:name]}
               type="text"
@@ -82,7 +87,12 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
               placeholder="you@example.com"
             />
             <div class="flex gap-3">
-              <.button variant="primary" phx-disable-with="Creating...">Create Channel</.button>
+              <.button
+                variant="primary"
+                phx-disable-with={if @editing_channel, do: "Saving...", else: "Creating..."}
+              >
+                {if @editing_channel, do: "Save Changes", else: "Create Channel"}
+              </.button>
               <button
                 type="button"
                 phx-click="toggle_email_form"
@@ -101,12 +111,16 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         >
           <div class="flex items-center gap-2 mb-4">
             <.icon name="hero-device-phone-mobile" class="size-5 text-accent-purple" />
-            <h3 class="text-lg font-semibold text-text-primary">New Pushover Channel</h3>
+            <h3 class="text-lg font-semibold text-text-primary">
+              {if @editing_channel && @editing_channel.channel_type == "pushover",
+                do: "Edit Pushover Channel",
+                else: "New Pushover Channel"}
+            </h3>
           </div>
           <.form
             for={@pushover_form}
             id="pushover-channel-form"
-            phx-submit="create_pushover"
+            phx-submit="save_pushover"
             class="space-y-4"
           >
             <.input
@@ -150,7 +164,12 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
               </a>
             </p>
             <div class="flex gap-3">
-              <.button variant="primary" phx-disable-with="Creating...">Create Channel</.button>
+              <.button
+                variant="primary"
+                phx-disable-with={if @editing_channel, do: "Saving...", else: "Creating..."}
+              >
+                {if @editing_channel, do: "Save Changes", else: "Create Channel"}
+              </.button>
               <button
                 type="button"
                 phx-click="toggle_pushover_form"
@@ -213,6 +232,14 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
+                    phx-click="edit_channel"
+                    phx-value-id={channel.id}
+                    class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
                     phx-click="toggle_enabled"
                     phx-value-id={channel.id}
                     class={[
@@ -247,72 +274,182 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
     {:noreply,
      socket
      |> assign(:show_email_form, !socket.assigns.show_email_form)
-     |> assign(:show_pushover_form, false)}
+     |> assign(:show_pushover_form, false)
+     |> assign(:editing_channel, nil)
+     |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))}
   end
 
   def handle_event("toggle_pushover_form", _, socket) do
     {:noreply,
      socket
      |> assign(:show_pushover_form, !socket.assigns.show_pushover_form)
-     |> assign(:show_email_form, false)}
+     |> assign(:show_email_form, false)
+     |> assign(:editing_channel, nil)
+     |> assign(
+       :pushover_form,
+       to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
+     )}
   end
 
-  def handle_event("create_email", %{"name" => name, "email" => email}, socket) do
+  def handle_event("edit_channel", %{"id" => id}, socket) do
     user = socket.assigns.current_scope.user
 
-    attrs = %{
-      channel_type: "email",
-      name: name,
-      config: %{"email" => email}
-    }
+    case Alerts.get_notification_channel(user, id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Channel not found")}
 
-    case Alerts.create_notification_channel(user, attrs) do
-      {:ok, channel} ->
+      %{channel_type: "email"} = channel ->
+        form_data = %{
+          "name" => channel.name,
+          "email" => channel.config["email"]
+        }
+
         {:noreply,
          socket
-         |> assign(:channels, [channel | socket.assigns.channels])
+         |> assign(:editing_channel, channel)
+         |> assign(:show_email_form, true)
+         |> assign(:show_pushover_form, false)
+         |> assign(:email_form, to_form(form_data))}
+
+      %{channel_type: "pushover"} = channel ->
+        form_data = %{
+          "name" => channel.name,
+          "user_key" => channel.config["user_key"],
+          "app_token" => channel.config["app_token"],
+          "priority" => to_string(channel.config["priority"] || 0)
+        }
+
+        {:noreply,
+         socket
+         |> assign(:editing_channel, channel)
+         |> assign(:show_pushover_form, true)
          |> assign(:show_email_form, false)
-         |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
-         |> put_flash(:info, "Email channel created")}
-
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, format_errors(changeset))}
+         |> assign(:pushover_form, to_form(form_data))}
     end
   end
 
-  def handle_event("create_pushover", params, socket) do
+  def handle_event("save_email", %{"name" => name, "email" => email}, socket) do
     user = socket.assigns.current_scope.user
 
+    if socket.assigns.editing_channel do
+      # Update mode
+      attrs = %{
+        name: name,
+        config: %{"email" => email}
+      }
+
+      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+        {:ok, updated} ->
+          channels =
+            Enum.map(socket.assigns.channels, fn c ->
+              if c.id == updated.id, do: updated, else: c
+            end)
+
+          {:noreply,
+           socket
+           |> assign(:channels, channels)
+           |> assign(:show_email_form, false)
+           |> assign(:editing_channel, nil)
+           |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
+           |> put_flash(:info, "Email channel updated")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
+    else
+      # Create mode
+      attrs = %{
+        channel_type: "email",
+        name: name,
+        config: %{"email" => email}
+      }
+
+      case Alerts.create_notification_channel(user, attrs) do
+        {:ok, channel} ->
+          {:noreply,
+           socket
+           |> assign(:channels, [channel | socket.assigns.channels])
+           |> assign(:show_email_form, false)
+           |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
+           |> put_flash(:info, "Email channel created")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
+    end
+  end
+
+  def handle_event("save_pushover", params, socket) do
+    user = socket.assigns.current_scope.user
     priority = String.to_integer(params["priority"])
 
-    attrs = %{
-      channel_type: "pushover",
-      name: params["name"],
-      config: %{
-        "user_key" => params["user_key"],
-        "app_token" => params["app_token"],
-        "priority" => priority
+    if socket.assigns.editing_channel do
+      # Update mode
+      attrs = %{
+        name: params["name"],
+        config: %{
+          "user_key" => params["user_key"],
+          "app_token" => params["app_token"],
+          "priority" => priority
+        }
       }
-    }
 
-    case Alerts.create_notification_channel(user, attrs) do
-      {:ok, channel} ->
-        {:noreply,
-         socket
-         |> assign(:channels, [channel | socket.assigns.channels])
-         |> assign(:show_pushover_form, false)
-         |> assign(
-           :pushover_form,
-           to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
-         )
-         |> put_flash(:info, "Pushover channel created")}
+      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+        {:ok, updated} ->
+          channels =
+            Enum.map(socket.assigns.channels, fn c ->
+              if c.id == updated.id, do: updated, else: c
+            end)
 
-      {:error, changeset} ->
-        {:noreply,
-         socket
-         |> put_flash(:error, format_errors(changeset))}
+          {:noreply,
+           socket
+           |> assign(:channels, channels)
+           |> assign(:show_pushover_form, false)
+           |> assign(:editing_channel, nil)
+           |> assign(
+             :pushover_form,
+             to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
+           )
+           |> put_flash(:info, "Pushover channel updated")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
+    else
+      # Create mode
+      attrs = %{
+        channel_type: "pushover",
+        name: params["name"],
+        config: %{
+          "user_key" => params["user_key"],
+          "app_token" => params["app_token"],
+          "priority" => priority
+        }
+      }
+
+      case Alerts.create_notification_channel(user, attrs) do
+        {:ok, channel} ->
+          {:noreply,
+           socket
+           |> assign(:channels, [channel | socket.assigns.channels])
+           |> assign(:show_pushover_form, false)
+           |> assign(
+             :pushover_form,
+             to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
+           )
+           |> put_flash(:info, "Pushover channel created")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
     end
   end
 

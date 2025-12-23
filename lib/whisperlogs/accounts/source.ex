@@ -98,4 +98,28 @@ defmodule WhisperLogs.Accounts.Source do
   """
   def syslog?(%__MODULE__{type: "syslog"}), do: true
   def syslog?(%__MODULE__{}), do: false
+
+  @doc """
+  Changeset for updating an HTTP source (name only).
+  """
+  def update_http_changeset(source, attrs) do
+    source
+    |> cast(attrs, [:name])
+    |> validate_required([:name])
+    |> validate_length(:name, min: 1, max: 100)
+  end
+
+  @doc """
+  Changeset for updating a syslog source.
+  Fields: name, port, transport, auto_register_hosts
+  """
+  def update_syslog_changeset(source, attrs) do
+    source
+    |> cast(attrs, [:name, :port, :transport, :auto_register_hosts])
+    |> validate_required([:name, :port, :transport])
+    |> validate_length(:name, min: 1, max: 100)
+    |> validate_inclusion(:transport, @transports, message: "must be udp, tcp, or both")
+    |> validate_number(:port, greater_than_or_equal_to: 1024, less_than_or_equal_to: 65535)
+    |> unique_constraint(:port, name: :sources_port_active_index)
+  end
 end
