@@ -31,6 +31,37 @@ import topbar from "../vendor/topbar"
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 
+// Shared copy-to-clipboard utility
+function copyToClipboard(text, button) {
+  const originalHTML = button.innerHTML
+
+  const showFeedback = (success) => {
+    const icon = success
+      ? '<svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg>'
+      : '<svg class="size-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" /></svg>'
+    const label = success ? 'Copied!' : 'Failed'
+    button.innerHTML = `${icon}<span>${label}</span>`
+    setTimeout(() => { button.innerHTML = originalHTML }, 1500)
+  }
+
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => showFeedback(true)).catch(() => showFeedback(false))
+  } else {
+    const textArea = document.createElement("textarea")
+    textArea.value = text
+    textArea.style.cssText = "position:fixed;left:-999999px;top:-999999px"
+    document.body.appendChild(textArea)
+    textArea.select()
+    try {
+      document.execCommand("copy")
+      showFeedback(true)
+    } catch (err) {
+      showFeedback(false)
+    }
+    textArea.remove()
+  }
+}
+
 const Hooks = {
   CopyToClipboard: {
     mounted() {
@@ -38,43 +69,9 @@ const Hooks = {
         const targetId = this.el.dataset.copyTarget
         const target = document.getElementById(targetId)
         if (target) {
-          const text = target.textContent.trim()
-          this.copyToClipboard(text)
+          copyToClipboard(target.textContent.trim(), this.el)
         }
       })
-    },
-    copyToClipboard(text) {
-      const originalText = this.el.textContent
-      const showSuccess = () => {
-        this.el.textContent = "Copied!"
-        setTimeout(() => { this.el.textContent = originalText }, 2000)
-      }
-      const showError = () => {
-        this.el.textContent = "Failed"
-        setTimeout(() => { this.el.textContent = originalText }, 2000)
-      }
-
-      // Try modern clipboard API first
-      if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(text).then(showSuccess).catch(showError)
-      } else {
-        // Fallback for insecure contexts
-        const textArea = document.createElement("textarea")
-        textArea.value = text
-        textArea.style.position = "fixed"
-        textArea.style.left = "-999999px"
-        textArea.style.top = "-999999px"
-        document.body.appendChild(textArea)
-        textArea.focus()
-        textArea.select()
-        try {
-          document.execCommand("copy")
-          showSuccess()
-        } catch (err) {
-          showError()
-        }
-        textArea.remove()
-      }
     }
   }
 }
@@ -89,6 +86,11 @@ const liveSocket = new LiveSocket("/live", Socket, {
 topbar.config({barColors: {0: "#29d"}, shadowColor: "rgba(0, 0, 0, .3)"})
 window.addEventListener("phx:page-loading-start", _info => topbar.show(300))
 window.addEventListener("phx:page-loading-stop", _info => topbar.hide())
+
+// Global copy-to-clipboard handler (uses shared utility)
+window.addEventListener("whisperlogs:copy", (e) => {
+  copyToClipboard(e.detail.text, e.target)
+})
 
 // connect if there are any LiveViews on the page
 liveSocket.connect()

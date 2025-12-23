@@ -142,7 +142,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
                 <%!-- Message + Metadata --%>
                 <span class="flex-1 break-all leading-relaxed">
-                  <span class="text-text-primary">{log.message}</span>
+                  <span class="text-text-primary whitespace-pre-wrap">{log.message}</span>
                   <%= if log.request_id || log.metadata != %{} do %>
                     <span class="text-text-tertiary ml-2">
                       <%= if log.request_id do %>
@@ -181,26 +181,69 @@ defmodule WhisperLogsWeb.LogsLive do
               <%!-- Expanded details --%>
               <div
                 id={"#{dom_id}-details"}
-                class="hidden border-t border-border-subtle bg-bg-surface/50 px-4 py-4 ml-[72px] mr-4 mb-2 rounded-lg"
+                class="hidden border-t border-border-subtle bg-bg-surface/50 px-4 py-3 ml-[72px] mr-4 mb-2 rounded-lg"
               >
-                <div class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-xs">
-                  <span class="text-text-tertiary font-medium">Timestamp</span>
-                  <span class="text-text-secondary font-mono">
-                    {DateTime.to_iso8601(log.timestamp)}
-                  </span>
-                  <span class="text-text-tertiary font-medium">Source</span>
-                  <span class="text-text-secondary font-mono">{log.source}</span>
-                  <%= if log.request_id do %>
-                    <span class="text-text-tertiary font-medium">Request ID</span>
-                    <span class="text-text-secondary font-mono">{log.request_id}</span>
-                  <% end %>
-                </div>
-                <%= if log.metadata != %{} do %>
-                  <div class="mt-4">
-                    <span class="text-xs text-text-tertiary font-medium">Metadata</span>
-                    <pre class="mt-2 bg-bg-base border border-border-default rounded-lg p-4 text-xs text-text-secondary overflow-x-auto"><code>{Jason.encode!(log.metadata, pretty: true)}</code></pre>
+                <div class="flex items-start justify-between gap-6">
+                  <%!-- Timestamps --%>
+                  <div class="flex items-center gap-6 text-xs">
+                    <div>
+                      <span class="text-text-tertiary">Logged</span>
+                      <span class="ml-2 font-mono text-text-secondary">
+                        {format_full_timestamp(log.timestamp)}
+                      </span>
+                    </div>
+                    <div>
+                      <span class="text-text-tertiary">Received</span>
+                      <span class="ml-2 font-mono text-text-secondary">
+                        {format_full_timestamp(log.inserted_at)}
+                      </span>
+                      <span
+                        :if={timestamp_delta_ms(log.timestamp, log.inserted_at) > 100}
+                        class={[
+                          "ml-2 px-1.5 py-0.5 rounded text-xs font-medium",
+                          timestamp_delta_class(log.timestamp, log.inserted_at)
+                        ]}
+                      >
+                        +{format_delta(log.timestamp, log.inserted_at)}
+                      </span>
+                    </div>
                   </div>
-                <% end %>
+
+                  <%!-- Actions --%>
+                  <div class="flex items-center gap-2">
+                    <%= if log.request_id do %>
+                      <button
+                        type="button"
+                        phx-click="filter-by-request-id"
+                        phx-value-request_id={log.request_id}
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors"
+                      >
+                        <.icon name="hero-funnel" class="size-3.5" /> Filter by request
+                      </button>
+                      <button
+                        type="button"
+                        phx-click={JS.dispatch("whisperlogs:copy", detail: %{text: log.request_id})}
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-bg-muted text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                      >
+                        <.icon name="hero-clipboard-document" class="size-3.5" /> Copy request ID
+                      </button>
+                    <% end %>
+                    <button
+                      type="button"
+                      phx-click={JS.dispatch("whisperlogs:copy", detail: %{text: log.message})}
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-bg-muted text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                    >
+                      <.icon name="hero-clipboard-document" class="size-3.5" /> Copy message
+                    </button>
+                    <button
+                      type="button"
+                      phx-click={JS.dispatch("whisperlogs:copy", detail: %{text: log_to_json(log)})}
+                      class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-bg-muted text-text-secondary hover:bg-bg-elevated hover:text-text-primary transition-colors"
+                    >
+                      <.icon name="hero-code-bracket" class="size-3.5" /> Copy as JSON
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -675,6 +718,25 @@ defmodule WhisperLogsWeb.LogsLive do
     {:noreply, assign(socket, :far_from_bottom?, false)}
   end
 
+  def handle_event("filter-by-request-id", %{"request_id" => request_id}, socket) do
+    filters = %{socket.assigns.filters | search: request_id}
+
+    logs = fetch_logs(filters)
+    {cursor_top, cursor_bottom} = extract_cursors(logs)
+    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
+
+    {:noreply,
+     socket
+     |> assign(:filters, filters)
+     |> assign(:cursor_top, cursor_top)
+     |> assign(:cursor_bottom, cursor_bottom)
+     |> assign(:has_older?, has_older?)
+     |> assign(:has_newer?, false)
+     |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
+     |> stream(:logs, logs, reset: true)}
+  end
+
   def handle_event("view-in-context", %{"id" => id, "timestamp" => timestamp_str}, socket) do
     {:ok, timestamp, _} = DateTime.from_iso8601(timestamp_str)
     cursor = {timestamp, id}
@@ -838,8 +900,51 @@ defmodule WhisperLogsWeb.LogsLive do
     Calendar.strftime(local_dt, "%m/%d %H:%M:%S.") <> format_milliseconds(local_dt)
   end
 
+  defp format_full_timestamp(dt) do
+    local_dt = DateTime.shift_zone!(dt, "America/Los_Angeles")
+    Calendar.strftime(local_dt, "%Y-%m-%d %H:%M:%S.") <> format_milliseconds(local_dt)
+  end
+
   defp format_milliseconds(%DateTime{microsecond: {us, _}}) do
     us |> div(1000) |> Integer.to_string() |> String.pad_leading(3, "0")
+  end
+
+  defp timestamp_delta_ms(logged, received) do
+    DateTime.diff(received, logged, :millisecond)
+  end
+
+  defp timestamp_delta_class(logged, received) do
+    delta_ms = timestamp_delta_ms(logged, received)
+
+    cond do
+      delta_ms > 60_000 -> "bg-red-500/20 text-red-400"
+      delta_ms > 5_000 -> "bg-amber-500/20 text-amber-400"
+      delta_ms > 100 -> "bg-blue-500/20 text-blue-400"
+      true -> ""
+    end
+  end
+
+  defp format_delta(logged, received) do
+    delta_ms = timestamp_delta_ms(logged, received)
+
+    cond do
+      delta_ms >= 60_000 -> "#{Float.round(delta_ms / 60_000, 1)}m"
+      delta_ms >= 1_000 -> "#{Float.round(delta_ms / 1_000, 1)}s"
+      true -> "#{delta_ms}ms"
+    end
+  end
+
+  defp log_to_json(log) do
+    %{
+      timestamp: DateTime.to_iso8601(log.timestamp),
+      received_at: DateTime.to_iso8601(log.inserted_at),
+      level: log.level,
+      message: log.message,
+      source: log.source,
+      request_id: log.request_id,
+      metadata: log.metadata
+    }
+    |> Jason.encode!(pretty: true)
   end
 
   defp format_metadata_value(value) when is_binary(value), do: value
