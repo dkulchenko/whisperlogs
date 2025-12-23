@@ -90,3 +90,24 @@ html {
   --color-accent-purple: #7c3aed;
   --color-accent-purple-hover: #6d28d9;
 }
+
+/* View in Context highlight animation */
+@keyframes context-pulse {
+  0% {
+    background-color: rgba(124, 58, 237, 0.3);
+    box-shadow: inset 0 0 0 2px rgba(124, 58, 237, 0.5);
+  }
+  50% {
+    background-color: rgba(124, 58, 237, 0.15);
+    box-shadow: inset 0 0 0 2px rgba(124, 58, 237, 0.3);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}
+
+.context-highlight {
+  animation: context-pulse 4s ease-out forwards;
+  border-radius: 0.25rem;
+}

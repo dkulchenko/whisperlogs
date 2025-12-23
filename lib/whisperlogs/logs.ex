@@ -114,6 +114,36 @@ defmodule WhisperLogs.Logs do
   end
 
   @doc """
+  Lists logs around a specific log entry for context viewing.
+  Returns logs centered around the target, with half before and half after.
+
+  Cursor is a tuple `{timestamp, id}` for the target log.
+  """
+  def list_logs_around({timestamp, id}, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 100)
+    half = div(limit, 2)
+
+    # Get logs before (including target), descending then reverse
+    before_logs =
+      Log
+      |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id <= ^id))
+      |> order_by([l], desc: l.timestamp, desc: l.id)
+      |> limit(^half)
+      |> Repo.all()
+      |> Enum.reverse()
+
+    # Get logs after target (excluding target), ascending
+    after_logs =
+      Log
+      |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
+      |> order_by([l], asc: l.timestamp, asc: l.id)
+      |> limit(^half)
+      |> Repo.all()
+
+    before_logs ++ after_logs
+  end
+
+  @doc """
   Checks if logs exist before the given cursor.
   """
   def has_logs_before?({timestamp, id}, opts \\ []) do

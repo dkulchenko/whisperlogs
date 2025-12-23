@@ -140,6 +140,22 @@ defmodule WhisperLogsWeb.LogsLive do
                   <% end %>
                 </span>
 
+                <%!-- View in context button - only shows when filters are active --%>
+                <button
+                  :if={filters_active?(@filters)}
+                  type="button"
+                  phx-click="view-in-context"
+                  phx-value-id={log.id}
+                  phx-value-timestamp={DateTime.to_iso8601(log.timestamp)}
+                  class="flex-shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-surface transition-all"
+                  title="View in context"
+                >
+                  <.icon
+                    name="hero-arrows-pointing-out"
+                    class="size-4 text-text-tertiary hover:text-accent-purple"
+                  />
+                </button>
+
                 <%!-- Expand indicator --%>
                 <.icon
                   name="hero-chevron-down"
@@ -182,14 +198,13 @@ defmodule WhisperLogsWeb.LogsLive do
             <.icon name="hero-arrow-path" class="size-4 animate-spin inline-block text-text-tertiary" />
             <span class="ml-2 text-xs text-text-tertiary">Loading newer logs...</span>
           </div>
-
         </div>
 
         <%!-- Jump to latest button - positioned outside scrollable area --%>
         <button
           :if={@has_newer?}
           phx-click="jump-to-latest"
-          class="absolute bottom-14 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-accent-purple text-white text-xs font-medium rounded-full shadow-lg hover:bg-accent-purple/90 transition-colors"
+          class="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-accent-purple text-white text-xs font-medium rounded-full shadow-lg hover:bg-accent-purple/90 transition-colors"
         >
           <.icon name="hero-arrow-down" class="size-4" /> Jump to latest
         </button>
@@ -360,6 +375,18 @@ defmodule WhisperLogsWeb.LogsLive do
             this.wasNearBottom = true
             this.lastScrollTop = this.el.scrollTop
           })
+
+          // Handle View in Context - scroll to specific log and highlight
+          this.handleEvent("scroll-to-log", ({ log_id }) => {
+            requestAnimationFrame(() => {
+              const logElement = document.getElementById(`logs-${log_id}`)
+              if (logElement) {
+                logElement.scrollIntoView({ behavior: "instant", block: "center" })
+                logElement.classList.add("context-highlight")
+                setTimeout(() => logElement.classList.remove("context-highlight"), 4000)
+              }
+            })
+          })
         },
 
         updated() {
@@ -445,6 +472,7 @@ defmodule WhisperLogsWeb.LogsLive do
           # After prepending with limit, some logs are pruned from the end.
           # Recalculate cursor_bottom: query @max_logs from new_cursor_top to find the new "bottom"
           opts_for_bottom = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
+
           new_bottom_log =
             Logs.list_logs_after(new_cursor_top, opts_for_bottom)
             |> List.last()
@@ -530,6 +558,31 @@ defmodule WhisperLogsWeb.LogsLive do
     {:noreply, assign(socket, :at_bottom?, true)}
   end
 
+  def handle_event("view-in-context", %{"id" => id, "timestamp" => timestamp_str}, socket) do
+    {:ok, timestamp, _} = DateTime.from_iso8601(timestamp_str)
+    cursor = {timestamp, id}
+
+    filters = default_filters()
+    logs = Logs.list_logs_around(cursor, limit: @max_logs)
+    {cursor_top, cursor_bottom} = extract_cursors(logs)
+
+    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
+
+    has_newer? =
+      cursor_bottom != nil and Logs.has_logs_after?(cursor_bottom, filter_opts(filters))
+
+    {:noreply,
+     socket
+     |> assign(:filters, filters)
+     |> assign(:cursor_top, cursor_top)
+     |> assign(:cursor_bottom, cursor_bottom)
+     |> assign(:has_older?, has_older?)
+     |> assign(:has_newer?, has_newer?)
+     |> assign(:at_bottom?, false)
+     |> stream(:logs, logs, reset: true)
+     |> push_event("scroll-to-log", %{log_id: id})}
+  end
+
   @impl true
   def handle_info({:new_log, log}, socket) do
     if socket.assigns.live_tail and log_matches_filters?(log, socket.assigns.filters) do
@@ -567,6 +620,12 @@ defmodule WhisperLogsWeb.LogsLive do
       source: "",
       levels: ~w(debug info warning error)
     }
+  end
+
+  defp filters_active?(filters) do
+    filters.search != "" or
+      filters.source != "" or
+      filters.levels != ~w(debug info warning error)
   end
 
   defp fetch_logs(filters) do
