@@ -25,6 +25,10 @@ config :whisperlogs,
   ecto_repos: [WhisperLogs.Repo],
   generators: [timestamp_type: :utc_datetime]
 
+# Registration settings
+# When allow_public is false, registration closes after first user is created
+config :whisperlogs, :registration, allow_public: false
+
 # Configure the endpoint
 config :whisperlogs, WhisperLogsWeb.Endpoint,
   url: [host: "localhost"],

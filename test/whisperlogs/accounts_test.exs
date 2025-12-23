@@ -23,12 +23,12 @@ defmodule WhisperLogs.AccountsTest do
     end
 
     test "does not return the user if the password is not valid" do
-      user = user_fixture() |> set_password()
+      user = user_fixture()
       refute Accounts.get_user_by_email_and_password(user.email, "invalid")
     end
 
     test "returns the user if the email and password are valid" do
-      %{id: id} = user = user_fixture() |> set_password()
+      %{id: id} = user = user_fixture()
 
       assert %User{id: ^id} =
                Accounts.get_user_by_email_and_password(user.email, valid_user_password())
@@ -48,42 +48,112 @@ defmodule WhisperLogs.AccountsTest do
     end
   end
 
+  describe "registration_allowed?/0" do
+    test "returns true when no users exist" do
+      assert Accounts.registration_allowed?()
+    end
+
+    test "returns false when users exist and config is false" do
+      user_fixture()
+      refute Accounts.registration_allowed?()
+    end
+  end
+
   describe "register_user/1" do
-    test "requires email to be set" do
+    test "requires email, password, and password confirmation to be set" do
       {:error, changeset} = Accounts.register_user(%{})
 
-      assert %{email: ["can't be blank"]} = errors_on(changeset)
+      assert %{
+               email: ["can't be blank"],
+               password: ["can't be blank"],
+               password_confirmation: ["does not match password"]
+             } = errors_on(changeset)
     end
 
     test "validates email when given" do
-      {:error, changeset} = Accounts.register_user(%{email: "not valid"})
+      password = valid_user_password()
+
+      {:error, changeset} =
+        Accounts.register_user(%{
+          email: "not valid",
+          password: password,
+          password_confirmation: password
+        })
 
       assert %{email: ["must have the @ sign and no spaces"]} = errors_on(changeset)
     end
 
     test "validates maximum values for email for security" do
       too_long = String.duplicate("db", 100)
-      {:error, changeset} = Accounts.register_user(%{email: too_long})
+      password = valid_user_password()
+
+      {:error, changeset} =
+        Accounts.register_user(%{
+          email: too_long,
+          password: password,
+          password_confirmation: password
+        })
+
       assert "should be at most 160 character(s)" in errors_on(changeset).email
     end
 
     test "validates email uniqueness" do
       %{email: email} = user_fixture()
-      {:error, changeset} = Accounts.register_user(%{email: email})
+      password = valid_user_password()
+
+      {:error, changeset} =
+        Accounts.register_user(%{email: email, password: password, password_confirmation: password})
+
       assert "has already been taken" in errors_on(changeset).email
 
       # Now try with the uppercased email too, to check that email case is ignored.
-      {:error, changeset} = Accounts.register_user(%{email: String.upcase(email)})
+      {:error, changeset} =
+        Accounts.register_user(%{
+          email: String.upcase(email),
+          password: password,
+          password_confirmation: password
+        })
+
       assert "has already been taken" in errors_on(changeset).email
     end
 
-    test "registers users without password" do
+    test "registers users with password and auto-confirms" do
       email = unique_user_email()
-      {:ok, user} = Accounts.register_user(valid_user_attributes(email: email))
+      password = valid_user_password()
+
+      {:ok, user} =
+        Accounts.register_user(%{
+          email: email,
+          password: password,
+          password_confirmation: password
+        })
+
       assert user.email == email
-      assert is_nil(user.hashed_password)
-      assert is_nil(user.confirmed_at)
+      assert user.hashed_password != nil
+      assert user.confirmed_at != nil
       assert is_nil(user.password)
+    end
+
+    test "validates password length" do
+      {:error, changeset} =
+        Accounts.register_user(%{
+          email: unique_user_email(),
+          password: "short",
+          password_confirmation: "short"
+        })
+
+      assert "should be at least 12 character(s)" in errors_on(changeset).password
+    end
+
+    test "validates password confirmation matches" do
+      {:error, changeset} =
+        Accounts.register_user(%{
+          email: unique_user_email(),
+          password: valid_user_password(),
+          password_confirmation: "different_password"
+        })
+
+      assert "does not match password" in errors_on(changeset).password_confirmation
     end
   end
 
@@ -134,7 +204,7 @@ defmodule WhisperLogs.AccountsTest do
 
   describe "update_user_email/2" do
     setup do
-      user = unconfirmed_user_fixture()
+      user = user_fixture()
       email = unique_user_email()
 
       token =
@@ -307,85 +377,12 @@ defmodule WhisperLogs.AccountsTest do
     end
   end
 
-  describe "get_user_by_magic_link_token/1" do
-    setup do
-      user = user_fixture()
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-      %{user: user, token: encoded_token}
-    end
-
-    test "returns user by token", %{user: user, token: token} do
-      assert session_user = Accounts.get_user_by_magic_link_token(token)
-      assert session_user.id == user.id
-    end
-
-    test "does not return user for invalid token" do
-      refute Accounts.get_user_by_magic_link_token("oops")
-    end
-
-    test "does not return user for expired token", %{token: token} do
-      {1, nil} = Repo.update_all(UserToken, set: [inserted_at: ~N[2020-01-01 00:00:00]])
-      refute Accounts.get_user_by_magic_link_token(token)
-    end
-  end
-
-  describe "login_user_by_magic_link/1" do
-    test "confirms user and expires tokens" do
-      user = unconfirmed_user_fixture()
-      refute user.confirmed_at
-      {encoded_token, hashed_token} = generate_user_magic_link_token(user)
-
-      assert {:ok, {user, [%{token: ^hashed_token}]}} =
-               Accounts.login_user_by_magic_link(encoded_token)
-
-      assert user.confirmed_at
-    end
-
-    test "returns user and (deleted) token for confirmed user" do
-      user = user_fixture()
-      assert user.confirmed_at
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-      assert {:ok, {^user, []}} = Accounts.login_user_by_magic_link(encoded_token)
-      # one time use only
-      assert {:error, :not_found} = Accounts.login_user_by_magic_link(encoded_token)
-    end
-
-    test "raises when unconfirmed user has password set" do
-      user = unconfirmed_user_fixture()
-      {1, nil} = Repo.update_all(User, set: [hashed_password: "hashed"])
-      {encoded_token, _hashed_token} = generate_user_magic_link_token(user)
-
-      assert_raise RuntimeError, ~r/magic link log in is not allowed/, fn ->
-        Accounts.login_user_by_magic_link(encoded_token)
-      end
-    end
-  end
-
   describe "delete_user_session_token/1" do
     test "deletes the token" do
       user = user_fixture()
       token = Accounts.generate_user_session_token(user)
       assert Accounts.delete_user_session_token(token) == :ok
       refute Accounts.get_user_by_session_token(token)
-    end
-  end
-
-  describe "deliver_login_instructions/2" do
-    setup do
-      %{user: unconfirmed_user_fixture()}
-    end
-
-    test "sends token through notification", %{user: user} do
-      token =
-        extract_user_token(fn url ->
-          Accounts.deliver_login_instructions(user, url)
-        end)
-
-      {:ok, token} = Base.url_decode64(token, padding: false)
-      assert user_token = Repo.get_by(UserToken, token: :crypto.hash(:sha256, token))
-      assert user_token.user_id == user.id
-      assert user_token.sent_to == user.email
-      assert user_token.context == "login"
     end
   end
 

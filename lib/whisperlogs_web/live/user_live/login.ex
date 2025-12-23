@@ -15,64 +15,23 @@ defmodule WhisperLogsWeb.UserLive.Login do
               <%= if @current_scope do %>
                 You need to reauthenticate to perform sensitive actions on your account.
               <% else %>
-                Don't have an account? <.link
-                  navigate={~p"/users/register"}
-                  class="font-semibold text-accent-purple hover:underline"
-                  phx-no-format
-                >Sign up</.link> for an account now.
+                <%= if @registration_allowed? do %>
+                  Don't have an account? <.link
+                    navigate={~p"/users/register"}
+                    class="font-semibold text-accent-purple hover:underline"
+                    phx-no-format
+                  >Sign up</.link> for an account now.
+                <% end %>
               <% end %>
             </:subtitle>
           </.header>
-        </div>
-
-        <div
-          :if={local_mail_adapter?()}
-          class="flex items-start gap-3 p-4 bg-bg-elevated border border-border-default rounded-lg text-sm"
-        >
-          <.icon name="hero-information-circle" class="size-5 shrink-0 text-info" />
-          <div class="text-text-secondary">
-            <p>You are running the local mail adapter.</p>
-            <p>
-              To see sent emails, visit <.link
-                href="/dev/mailbox"
-                class="text-accent-purple underline"
-              >the mailbox page</.link>.
-            </p>
-          </div>
         </div>
 
         <div class="bg-bg-elevated border border-border-default rounded-lg p-6">
           <.form
             :let={f}
             for={@form}
-            id="login_form_magic"
-            action={~p"/users/log-in"}
-            phx-submit="submit_magic"
-          >
-            <.input
-              readonly={!!@current_scope}
-              field={f[:email]}
-              type="email"
-              label="Email"
-              autocomplete="email"
-              required
-              phx-mounted={JS.focus()}
-            />
-            <.button variant="primary" class="w-full">
-              Log in with email <span aria-hidden="true">→</span>
-            </.button>
-          </.form>
-
-          <div class="flex items-center gap-4 my-6">
-            <div class="flex-1 h-px bg-border-default"></div>
-            <span class="text-xs text-text-tertiary font-medium">or</span>
-            <div class="flex-1 h-px bg-border-default"></div>
-          </div>
-
-          <.form
-            :let={f}
-            for={@form}
-            id="login_form_password"
+            id="login_form"
             action={~p"/users/log-in"}
             phx-submit="submit_password"
             phx-trigger-action={@trigger_submit}
@@ -84,12 +43,14 @@ defmodule WhisperLogsWeb.UserLive.Login do
               label="Email"
               autocomplete="email"
               required
+              phx-mounted={JS.focus()}
             />
             <.input
               field={@form[:password]}
               type="password"
               label="Password"
               autocomplete="current-password"
+              required
             />
             <.button variant="primary" class="w-full" name={@form[:remember_me].name} value="true">
               Log in and stay logged in <span aria-hidden="true">→</span>
@@ -112,32 +73,14 @@ defmodule WhisperLogsWeb.UserLive.Login do
 
     form = to_form(%{"email" => email}, as: "user")
 
-    {:ok, assign(socket, form: form, trigger_submit: false)}
+    {:ok,
+     socket
+     |> assign(form: form, trigger_submit: false)
+     |> assign(registration_allowed?: Accounts.registration_allowed?())}
   end
 
   @impl true
   def handle_event("submit_password", _params, socket) do
     {:noreply, assign(socket, :trigger_submit, true)}
-  end
-
-  def handle_event("submit_magic", %{"user" => %{"email" => email}}, socket) do
-    if user = Accounts.get_user_by_email(email) do
-      Accounts.deliver_login_instructions(
-        user,
-        &url(~p"/users/log-in/#{&1}")
-      )
-    end
-
-    info =
-      "If your email is in our system, you will receive instructions for logging in shortly."
-
-    {:noreply,
-     socket
-     |> put_flash(:info, info)
-     |> push_navigate(to: ~p"/users/log-in")}
-  end
-
-  defp local_mail_adapter? do
-    Application.get_env(:whisperlogs, WhisperLogs.Mailer)[:adapter] == Swoosh.Adapters.Local
   end
 end
