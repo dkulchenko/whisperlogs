@@ -248,7 +248,7 @@ defmodule WhisperLogs.Logs do
 
   defp parse_timestamp(ts) when is_binary(ts) do
     case DateTime.from_iso8601(ts) do
-      {:ok, dt, _offset} -> dt
+      {:ok, dt, _offset} -> DateTime.truncate(dt, :microsecond)
       _ -> nil
     end
   end

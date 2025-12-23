@@ -14,6 +14,8 @@ defmodule WhisperLogs.Application do
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
       # Log retention cleanup
       WhisperLogs.Retention,
+      # Syslog listener infrastructure
+      WhisperLogs.Syslog.Supervisor,
       # Start to serve requests, typically the last entry
       WhisperLogsWeb.Endpoint
     ]

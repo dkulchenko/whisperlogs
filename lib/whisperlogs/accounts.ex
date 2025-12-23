@@ -6,7 +6,7 @@ defmodule WhisperLogs.Accounts do
   import Ecto.Query, warn: false
   alias WhisperLogs.Repo
 
-  alias WhisperLogs.Accounts.{ApiKey, User, UserToken, UserNotifier}
+  alias WhisperLogs.Accounts.{Source, User, UserToken, UserNotifier}
 
   ## Database getters
 
@@ -298,77 +298,139 @@ defmodule WhisperLogs.Accounts do
     end)
   end
 
-  ## API Keys
+  ## Sources (HTTP and Syslog)
 
   @doc """
-  Creates a new API key for a user.
-
-  Returns `{:ok, %{api_key: api_key, raw_key: raw_key}}` where `raw_key`
-  is the full key to show to the user once.
+  Creates a new HTTP source for a user.
+  Generates an API key for authentication.
   """
-  def create_api_key(%User{} = user, attrs) do
-    key = ApiKey.generate_key()
+  def create_http_source(%User{} = user, attrs) do
+    key = Source.generate_key()
 
     changeset =
-      %ApiKey{user_id: user.id}
-      |> ApiKey.changeset(attrs)
+      %Source{user_id: user.id}
+      |> Source.http_changeset(attrs)
       |> Ecto.Changeset.put_change(:key, key)
 
     case Repo.insert(changeset) do
-      {:ok, api_key} -> {:ok, api_key}
+      {:ok, source} -> {:ok, source}
       {:error, changeset} -> {:error, changeset}
     end
   end
 
   @doc """
-  Lists all active (non-revoked) API keys for a user.
+  Creates a new syslog source for a user.
+  Starts a listener on the specified port after creation.
   """
-  def list_api_keys(%User{id: user_id}) do
-    ApiKey
-    |> where([k], k.user_id == ^user_id and is_nil(k.revoked_at))
-    |> order_by([k], desc: k.inserted_at)
-    |> Repo.all()
-  end
+  def create_syslog_source(%User{} = user, attrs) do
+    changeset =
+      %Source{user_id: user.id}
+      |> Source.syslog_changeset(attrs)
 
-  @doc """
-  Gets an API key by ID for a user.
-  """
-  def get_api_key(%User{id: user_id}, key_id) do
-    Repo.get_by(ApiKey, id: key_id, user_id: user_id)
-  end
+    case Repo.insert(changeset) do
+      {:ok, source} ->
+        # Start the listener
+        WhisperLogs.Syslog.Supervisor.start_listener(source)
+        {:ok, source}
 
-  @doc """
-  Gets an API key by raw token.
-
-  Returns `{:ok, api_key}` if valid and active, `{:error, :invalid_key}` otherwise.
-  """
-  def get_api_key_by_token(key) when is_binary(key) do
-    query =
-      from k in ApiKey,
-        where: k.key == ^key and is_nil(k.revoked_at),
-        preload: [:user]
-
-    case Repo.one(query) do
-      nil -> {:error, :invalid_key}
-      api_key -> {:ok, api_key}
+      {:error, changeset} ->
+        {:error, changeset}
     end
   end
 
   @doc """
-  Revokes an API key (soft delete).
+  Lists all active (non-revoked) sources for a user.
   """
-  def revoke_api_key(%ApiKey{} = api_key) do
-    api_key
+  def list_sources(%User{id: user_id}) do
+    Source
+    |> where([s], s.user_id == ^user_id and is_nil(s.revoked_at))
+    |> order_by([s], desc: s.inserted_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Lists all active syslog sources (for startup initialization).
+  """
+  def list_syslog_sources do
+    Source
+    |> where([s], s.type == "syslog" and is_nil(s.revoked_at))
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a source by ID for a user.
+  """
+  def get_source(%User{id: user_id}, source_id) do
+    Repo.get_by(Source, id: source_id, user_id: user_id)
+  end
+
+  @doc """
+  Gets a source by raw API token (HTTP sources only).
+
+  Returns `{:ok, source}` if valid and active, `{:error, :invalid_key}` otherwise.
+  """
+  def get_source_by_token(key) when is_binary(key) do
+    query =
+      from s in Source,
+        where: s.key == ^key and is_nil(s.revoked_at) and s.type == "http",
+        preload: [:user]
+
+    case Repo.one(query) do
+      nil -> {:error, :invalid_key}
+      source -> {:ok, source}
+    end
+  end
+
+  @doc """
+  Revokes a source (soft delete).
+  Stops the syslog listener if it's a syslog source.
+  """
+  def revoke_source(%Source{type: "syslog"} = source) do
+    # Stop the listener first
+    WhisperLogs.Syslog.Supervisor.stop_listener(source.id)
+
+    source
+    |> Ecto.Changeset.change(revoked_at: DateTime.utc_now(:second))
+    |> Repo.update()
+  end
+
+  def revoke_source(%Source{} = source) do
+    source
     |> Ecto.Changeset.change(revoked_at: DateTime.utc_now(:second))
     |> Repo.update()
   end
 
   @doc """
-  Updates the last_used_at timestamp for an API key.
+  Updates the last_used_at timestamp for a source.
   Called asynchronously from the auth plug.
   """
-  def touch_api_key(%ApiKey{id: id}) do
-    from(k in ApiKey, where: k.id == ^id)
+  def touch_source(%Source{id: id}) do
+    from(s in Source, where: s.id == ^id)
     |> Repo.update_all(set: [last_used_at: DateTime.utc_now(:second)])
   end
+
+  @doc """
+  Returns the next available port for syslog sources.
+  Starts from base_port and finds the first unused port.
+  """
+  def next_available_syslog_port(base_port \\ 10514) do
+    used_ports =
+      Source
+      |> where([s], s.type == "syslog" and is_nil(s.revoked_at))
+      |> select([s], s.port)
+      |> Repo.all()
+      |> MapSet.new()
+
+    find_available_port(base_port, used_ports)
+  end
+
+  defp find_available_port(port, used_ports) when port < 65535 do
+    if MapSet.member?(used_ports, port) do
+      find_available_port(port + 1, used_ports)
+    else
+      port
+    end
+  end
+
+  defp find_available_port(_port, _used_ports), do: nil
 end

@@ -4,7 +4,7 @@ defmodule WhisperLogsWeb.Plugs.ApiAuth do
 
   Expects: `Authorization: Bearer wl_xxxxx...`
 
-  On success, assigns `:api_key` to conn with the validated API key struct.
+  On success, assigns `:http_source` to conn with the validated source struct.
   On failure, returns 401 Unauthorized.
   """
 
@@ -15,13 +15,13 @@ defmodule WhisperLogsWeb.Plugs.ApiAuth do
 
   def call(conn, _opts) do
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
-         {:ok, api_key} <- Accounts.get_api_key_by_token(token) do
+         {:ok, http_source} <- Accounts.get_source_by_token(token) do
       # Update last_used_at asynchronously (don't block the request)
-      Task.start(fn -> Accounts.touch_api_key(api_key) end)
+      Task.start(fn -> Accounts.touch_source(http_source) end)
 
       conn
-      |> assign(:api_key, api_key)
-      |> assign(:source, api_key.source)
+      |> assign(:http_source, http_source)
+      |> assign(:source, http_source.source)
     else
       _ ->
         conn

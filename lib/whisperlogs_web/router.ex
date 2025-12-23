@@ -51,7 +51,7 @@ defmodule WhisperLogsWeb.Router do
     live_session :require_authenticated_user,
       on_mount: [{WhisperLogsWeb.UserAuth, :require_authenticated}] do
       live "/", LogsLive
-      live "/api-keys", ApiKeysLive
+      live "/sources", SourcesLive
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

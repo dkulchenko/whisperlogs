@@ -55,10 +55,10 @@ defmodule WhisperLogsWeb.Layouts do
                   Logs
                 </.link>
                 <.link
-                  navigate={~p"/api-keys"}
+                  navigate={~p"/sources"}
                   class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
-                  API Keys
+                  Sources
                 </.link>
               </nav>
             <% end %>
