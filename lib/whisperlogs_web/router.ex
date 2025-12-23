@@ -52,6 +52,7 @@ defmodule WhisperLogsWeb.Router do
       on_mount: [{WhisperLogsWeb.UserAuth, :require_authenticated}] do
       live "/", LogsLive
       live "/sources", SourcesLive
+      live "/metrics", MetricsLive
       live "/users/settings", UserLive.Settings, :edit
       live "/users/settings/confirm-email/:token", UserLive.Settings, :confirm_email
     end

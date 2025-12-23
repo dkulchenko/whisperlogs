@@ -220,6 +220,114 @@ defmodule WhisperLogs.Logs do
   end
 
   @doc """
+  Returns the total count of logs in the database.
+  """
+  def count_logs do
+    Repo.aggregate(Log, :count, :id)
+  end
+
+  @doc """
+  Returns hourly log volume for the past N hours.
+  Returns list of `{datetime, count, bytes}` tuples.
+  """
+  def volume_by_hour(hours \\ 48) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
+
+    Log
+    |> where([l], l.timestamp >= ^cutoff)
+    |> group_by([l], fragment("date_trunc('hour', ?)", l.timestamp))
+    |> select([l], {
+      fragment("date_trunc('hour', ?)", l.timestamp),
+      count(l.id),
+      sum(
+        fragment(
+          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+          l.message,
+          l.metadata
+        )
+      )
+    })
+    |> order_by([l], asc: fragment("date_trunc('hour', ?)", l.timestamp))
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns daily log volume for the past N days.
+  Returns list of `{datetime, count, bytes}` tuples.
+  """
+  def volume_by_day(days \\ 30) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
+
+    Log
+    |> where([l], l.timestamp >= ^cutoff)
+    |> group_by([l], fragment("date_trunc('day', ?)", l.timestamp))
+    |> select([l], {
+      fragment("date_trunc('day', ?)", l.timestamp),
+      count(l.id),
+      sum(
+        fragment(
+          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+          l.message,
+          l.metadata
+        )
+      )
+    })
+    |> order_by([l], asc: fragment("date_trunc('day', ?)", l.timestamp))
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns monthly log volume for the past N months.
+  Returns list of `{datetime, count, bytes}` tuples.
+  """
+  def volume_by_month(months \\ 12) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-months * 30, :day)
+
+    Log
+    |> where([l], l.timestamp >= ^cutoff)
+    |> group_by([l], fragment("date_trunc('month', ?)", l.timestamp))
+    |> select([l], {
+      fragment("date_trunc('month', ?)", l.timestamp),
+      count(l.id),
+      sum(
+        fragment(
+          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+          l.message,
+          l.metadata
+        )
+      )
+    })
+    |> order_by([l], asc: fragment("date_trunc('month', ?)", l.timestamp))
+    |> Repo.all()
+  end
+
+  @doc """
+  Returns total volume from the past N hours for projection calculations.
+  Returns `{count, bytes}` tuple.
+  """
+  def volume_last_n_hours(hours) do
+    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
+
+    Log
+    |> where([l], l.timestamp >= ^cutoff)
+    |> select([l], {
+      count(l.id),
+      sum(
+        fragment(
+          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+          l.message,
+          l.metadata
+        )
+      )
+    })
+    |> Repo.one()
+    |> case do
+      {nil, nil} -> {0, 0}
+      {count, bytes} -> {count, bytes || 0}
+    end
+  end
+
+  @doc """
   Deletes logs older than the given datetime.
 
   Returns `{count, nil}` where count is the number of deleted logs.

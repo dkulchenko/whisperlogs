@@ -51,7 +51,12 @@ defmodule WhisperLogs.Retention do
     Process.send_after(self(), :cleanup, @cleanup_interval)
   end
 
-  defp retention_days do
+  @doc """
+  Returns the configured retention period in days.
+  Configurable via WHISPERLOGS_RETENTION_DAYS environment variable.
+  Defaults to 30 days.
+  """
+  def retention_days do
     case System.get_env("WHISPERLOGS_RETENTION_DAYS") do
       nil -> @default_retention_days
       days -> String.to_integer(days)

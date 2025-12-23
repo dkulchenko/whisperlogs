@@ -60,6 +60,12 @@ defmodule WhisperLogsWeb.Layouts do
                 >
                   Sources
                 </.link>
+                <.link
+                  navigate={~p"/metrics"}
+                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                >
+                  Metrics
+                </.link>
               </nav>
             <% end %>
           </div>

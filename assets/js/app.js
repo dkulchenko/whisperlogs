@@ -2,6 +2,10 @@
 // to get started and then uncomment the line below.
 // import "./user_socket.js"
 
+// ECharts for metrics visualization (tree-shaken, exposed globally for colocated hooks)
+import echarts from "./echarts.js"
+window.echarts = echarts
+
 // You can include dependencies in two ways.
 //
 // The simplest option is to put them in assets/vendor and
