@@ -7,8 +7,13 @@ defmodule WhisperLogs.Exports.Exporter do
   require Logger
 
   alias WhisperLogs.Exports
-  alias WhisperLogs.Exports.{ExportDestination, ExportJob, S3Client}
+  alias WhisperLogs.Exports.{ExportDestination, ExportJob}
   alias WhisperLogs.Repo
+
+  # Use configurable S3 client for testability
+  defp s3_client do
+    Application.get_env(:whisperlogs, :s3_client, WhisperLogs.Exports.S3Client)
+  end
 
   @doc """
   Executes an export job.
@@ -173,7 +178,7 @@ defmodule WhisperLogs.Exports.Exporter do
 
     body = File.read!(temp_path)
 
-    S3Client.put_object(dest, key, body, content_type: "application/gzip")
+    s3_client().put_object(dest, key, body, content_type: "application/gzip")
   end
 
   defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"

@@ -268,7 +268,8 @@ defmodule WhisperLogs.Accounts do
         [t],
         (t.context == "session" and t.inserted_at < ^session_cutoff) or
           (t.context == "login" and t.inserted_at < ^magic_link_cutoff) or
-          (t.context != "session" and t.context != "login" and t.inserted_at < ^change_email_cutoff)
+          (t.context != "session" and t.context != "login" and
+             t.inserted_at < ^change_email_cutoff)
       )
       |> Repo.delete_all()
 

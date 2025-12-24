@@ -38,6 +38,12 @@ defmodule WhisperLogs.Alerts.Evaluator do
     {:noreply, state}
   end
 
+  # Ignore messages from Swoosh test adapter and other unexpected messages
+  @impl true
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
   defp schedule_evaluation do
     Process.send_after(self(), :evaluate, @evaluation_interval)
   end

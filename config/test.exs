@@ -9,10 +9,11 @@ config :whisperlogs, :auto_migrate, false
 # Configure both database repos - runtime.exs decides which one to start
 
 # SQLite config (used when no DATABASE_URL)
+# Use pool_size: 1 to avoid "Database busy" errors with concurrent tests
 config :whisperlogs, WhisperLogs.Repo.SQLite,
   database: Path.expand("../priv/test.db", __DIR__),
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10,
+  pool_size: 1,
   journal_mode: :wal,
   busy_timeout: 5000,
   synchronous: :normal,

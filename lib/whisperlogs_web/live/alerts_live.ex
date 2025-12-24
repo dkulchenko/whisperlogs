@@ -47,366 +47,370 @@ defmodule WhisperLogsWeb.AlertsLive do
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
         <div class="max-w-4xl mx-auto px-6 py-8">
-        <.header>
-          Alerts
-          <:subtitle>
-            Create alerts to get notified when log patterns match or velocity thresholds are exceeded.
-          </:subtitle>
-        </.header>
+          <.header>
+            Alerts
+            <:subtitle>
+              Create alerts to get notified when log patterns match or velocity thresholds are exceeded.
+            </:subtitle>
+          </.header>
 
-        <div class="mt-8 flex items-center gap-3">
-          <button
-            :if={!@show_form}
-            type="button"
-            phx-click="show_form"
-            class={[
-              "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
-              "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
-              "border border-accent-purple/30"
-            ]}
-          >
-            <.icon name="hero-plus" class="size-4" /> Create Alert
-          </button>
-          <.link
-            :if={!@show_form}
-            navigate={~p"/notification-channels"}
-            class="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surface border border-border-default transition-colors"
-          >
-            <.icon name="hero-bell" class="size-4" /> Notification Channels
-          </.link>
-        </div>
-
-        <%!-- Alert Form --%>
-        <div :if={@show_form} class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6">
-          <div class="flex items-center gap-2 mb-4">
-            <.icon name="hero-bell-alert" class="size-5 text-accent-purple" />
-            <h3 class="text-lg font-semibold text-text-primary">
-              {if @editing_alert, do: "Edit Alert", else: "New Alert"}
-            </h3>
+          <div class="mt-8 flex items-center gap-3">
+            <button
+              :if={!@show_form}
+              type="button"
+              phx-click="show_form"
+              class={[
+                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
+                "border border-accent-purple/30"
+              ]}
+            >
+              <.icon name="hero-plus" class="size-4" /> Create Alert
+            </button>
+            <.link
+              :if={!@show_form}
+              navigate={~p"/notification-channels"}
+              class="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surface border border-border-default transition-colors"
+            >
+              <.icon name="hero-bell" class="size-4" /> Notification Channels
+            </.link>
           </div>
 
-          <.form
-            for={@form}
-            id="alert-form"
-            phx-submit="save_alert"
-            phx-change="validate_form"
-            class="space-y-4"
+          <%!-- Alert Form --%>
+          <div
+            :if={@show_form}
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
           >
-            <.input
-              field={@form[:name]}
-              type="text"
-              label="Name"
-              placeholder="e.g., Error Rate Alert"
-              phx-debounce="300"
-            />
-
-            <.input
-              field={@form[:description]}
-              type="text"
-              label="Description (optional)"
-              placeholder="What does this alert monitor?"
-              phx-debounce="300"
-            />
-
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2">Search Query</label>
-              <.input
-                field={@form[:search_query]}
-                type="text"
-                placeholder="e.g., level:error source:prod"
-                phx-debounce="300"
-              />
-              <%!-- Match counts preview --%>
-              <div class="mt-2 flex items-center gap-4 text-sm">
-                <%= if @counting do %>
-                  <span class="text-text-tertiary flex items-center gap-1.5">
-                    <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin">
-                    </span>
-                    Counting matches...
-                  </span>
-                <% else %>
-                  <%= if @match_counts do %>
-                    <span class="text-text-tertiary">Matches:</span>
-                    <span class={[
-                      "px-2 py-0.5 rounded text-xs font-medium",
-                      @match_counts.hour > 0 && "bg-emerald-500/20 text-emerald-400",
-                      @match_counts.hour == 0 && "bg-bg-surface text-text-tertiary"
-                    ]}>
-                      {format_count(@match_counts.hour)} in 1h
-                    </span>
-                    <span class={[
-                      "px-2 py-0.5 rounded text-xs font-medium",
-                      @match_counts.day > 0 && "bg-emerald-500/20 text-emerald-400",
-                      @match_counts.day == 0 && "bg-bg-surface text-text-tertiary"
-                    ]}>
-                      {format_count(@match_counts.day)} in 24h
-                    </span>
-                    <span class={[
-                      "px-2 py-0.5 rounded text-xs font-medium",
-                      @match_counts.week > 0 && "bg-emerald-500/20 text-emerald-400",
-                      @match_counts.week == 0 && "bg-bg-surface text-text-tertiary"
-                    ]}>
-                      {format_count(@match_counts.week)} in 7d
-                    </span>
-                  <% end %>
-                <% end %>
-              </div>
-              <p class="mt-1 text-sm text-text-tertiary">
-                Same syntax as the logs search. Examples: <code class="text-accent-purple">level:error</code>, <code class="text-accent-purple">user_id:123</code>,
-                <code class="text-accent-purple">duration_ms:>1000</code>
-              </p>
+            <div class="flex items-center gap-2 mb-4">
+              <.icon name="hero-bell-alert" class="size-5 text-accent-purple" />
+              <h3 class="text-lg font-semibold text-text-primary">
+                {if @editing_alert, do: "Edit Alert", else: "New Alert"}
+              </h3>
             </div>
 
-            <.input
-              field={@form[:alert_type]}
-              type="select"
-              label="Alert Type"
-              options={[
-                {"Any Match - Alert when any log matches", "any_match"},
-                {"Velocity - Alert when match count exceeds threshold", "velocity"}
-              ]}
-            />
-
-            <div :if={@form[:alert_type].value == "velocity"} class="grid grid-cols-2 gap-4">
+            <.form
+              for={@form}
+              id="alert-form"
+              phx-submit="save_alert"
+              phx-change="validate_form"
+              class="space-y-4"
+            >
               <.input
-                field={@form[:velocity_threshold]}
-                type="number"
-                label="Threshold (matches)"
-                min="1"
+                field={@form[:name]}
+                type="text"
+                label="Name"
+                placeholder="e.g., Error Rate Alert"
                 phx-debounce="300"
               />
+
               <.input
-                field={@form[:velocity_window_seconds]}
+                field={@form[:description]}
+                type="text"
+                label="Description (optional)"
+                placeholder="What does this alert monitor?"
+                phx-debounce="300"
+              />
+
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">Search Query</label>
+                <.input
+                  field={@form[:search_query]}
+                  type="text"
+                  placeholder="e.g., level:error source:prod"
+                  phx-debounce="300"
+                />
+                <%!-- Match counts preview --%>
+                <div class="mt-2 flex items-center gap-4 text-sm">
+                  <%= if @counting do %>
+                    <span class="text-text-tertiary flex items-center gap-1.5">
+                      <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin">
+                      </span>
+                      Counting matches...
+                    </span>
+                  <% else %>
+                    <%= if @match_counts do %>
+                      <span class="text-text-tertiary">Matches:</span>
+                      <span class={[
+                        "px-2 py-0.5 rounded text-xs font-medium",
+                        @match_counts.hour > 0 && "bg-emerald-500/20 text-emerald-400",
+                        @match_counts.hour == 0 && "bg-bg-surface text-text-tertiary"
+                      ]}>
+                        {format_count(@match_counts.hour)} in 1h
+                      </span>
+                      <span class={[
+                        "px-2 py-0.5 rounded text-xs font-medium",
+                        @match_counts.day > 0 && "bg-emerald-500/20 text-emerald-400",
+                        @match_counts.day == 0 && "bg-bg-surface text-text-tertiary"
+                      ]}>
+                        {format_count(@match_counts.day)} in 24h
+                      </span>
+                      <span class={[
+                        "px-2 py-0.5 rounded text-xs font-medium",
+                        @match_counts.week > 0 && "bg-emerald-500/20 text-emerald-400",
+                        @match_counts.week == 0 && "bg-bg-surface text-text-tertiary"
+                      ]}>
+                        {format_count(@match_counts.week)} in 7d
+                      </span>
+                    <% end %>
+                  <% end %>
+                </div>
+                <p class="mt-1 text-sm text-text-tertiary">
+                  Same syntax as the logs search. Examples: <code class="text-accent-purple">level:error</code>, <code class="text-accent-purple">user_id:123</code>,
+                  <code class="text-accent-purple">duration_ms:>1000</code>
+                </p>
+              </div>
+
+              <.input
+                field={@form[:alert_type]}
                 type="select"
-                label="Time Window"
+                label="Alert Type"
+                options={[
+                  {"Any Match - Alert when any log matches", "any_match"},
+                  {"Velocity - Alert when match count exceeds threshold", "velocity"}
+                ]}
+              />
+
+              <div :if={@form[:alert_type].value == "velocity"} class="grid grid-cols-2 gap-4">
+                <.input
+                  field={@form[:velocity_threshold]}
+                  type="number"
+                  label="Threshold (matches)"
+                  min="1"
+                  phx-debounce="300"
+                />
+                <.input
+                  field={@form[:velocity_window_seconds]}
+                  type="select"
+                  label="Time Window"
+                  options={[
+                    {"1 minute", "60"},
+                    {"5 minutes", "300"},
+                    {"15 minutes", "900"},
+                    {"1 hour", "3600"}
+                  ]}
+                />
+              </div>
+
+              <.input
+                field={@form[:cooldown_seconds]}
+                type="select"
+                label="Cooldown (prevent repeat alerts)"
                 options={[
                   {"1 minute", "60"},
                   {"5 minutes", "300"},
                   {"15 minutes", "900"},
-                  {"1 hour", "3600"}
+                  {"30 minutes", "1800"},
+                  {"1 hour", "3600"},
+                  {"4 hours", "14400"},
+                  {"24 hours", "86400"}
                 ]}
               />
-            </div>
 
-            <.input
-              field={@form[:cooldown_seconds]}
-              type="select"
-              label="Cooldown (prevent repeat alerts)"
-              options={[
-                {"1 minute", "60"},
-                {"5 minutes", "300"},
-                {"15 minutes", "900"},
-                {"30 minutes", "1800"},
-                {"1 hour", "3600"},
-                {"4 hours", "14400"},
-                {"24 hours", "86400"}
-              ]}
-            />
+              <div>
+                <label class="block text-sm font-medium text-text-primary mb-2">
+                  Notification Channels
+                </label>
+                <%= if @channels == [] do %>
+                  <p class="text-sm text-text-tertiary">
+                    No channels configured.
+                    <.link
+                      navigate={~p"/notification-channels"}
+                      class="text-accent-purple hover:underline"
+                    >
+                      Create one first
+                    </.link>
+                  </p>
+                <% else %>
+                  <div class="space-y-2">
+                    <label
+                      :for={channel <- @channels}
+                      class="flex items-center gap-3 p-3 bg-bg-surface border border-border-default rounded-lg cursor-pointer hover:border-border-subtle transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        name="channel_ids[]"
+                        value={channel.id}
+                        checked={to_string(channel.id) in (@form[:channel_ids].value || [])}
+                        class="rounded border-border-default text-accent-purple focus:ring-accent-purple"
+                      />
+                      <div class="flex items-center gap-2">
+                        <%= if channel.channel_type == "email" do %>
+                          <.icon name="hero-envelope" class="size-4 text-text-tertiary" />
+                        <% else %>
+                          <.icon name="hero-device-phone-mobile" class="size-4 text-text-tertiary" />
+                        <% end %>
+                        <span class="text-text-primary">{channel.name}</span>
+                        <span class="text-xs text-text-tertiary">
+                          ({channel.channel_type})
+                        </span>
+                      </div>
+                    </label>
+                  </div>
+                <% end %>
+              </div>
 
-            <div>
-              <label class="block text-sm font-medium text-text-primary mb-2">
-                Notification Channels
-              </label>
-              <%= if @channels == [] do %>
-                <p class="text-sm text-text-tertiary">
-                  No channels configured.
-                  <.link
-                    navigate={~p"/notification-channels"}
-                    class="text-accent-purple hover:underline"
-                  >
-                    Create one first
-                  </.link>
-                </p>
-              <% else %>
-                <div class="space-y-2">
-                  <label
-                    :for={channel <- @channels}
-                    class="flex items-center gap-3 p-3 bg-bg-surface border border-border-default rounded-lg cursor-pointer hover:border-border-subtle transition-colors"
-                  >
-                    <input
-                      type="checkbox"
-                      name="channel_ids[]"
-                      value={channel.id}
-                      checked={to_string(channel.id) in (@form[:channel_ids].value || [])}
-                      class="rounded border-border-default text-accent-purple focus:ring-accent-purple"
-                    />
-                    <div class="flex items-center gap-2">
-                      <%= if channel.channel_type == "email" do %>
-                        <.icon name="hero-envelope" class="size-4 text-text-tertiary" />
-                      <% else %>
-                        <.icon name="hero-device-phone-mobile" class="size-4 text-text-tertiary" />
-                      <% end %>
-                      <span class="text-text-primary">{channel.name}</span>
-                      <span class="text-xs text-text-tertiary">
-                        ({channel.channel_type})
-                      </span>
-                    </div>
-                  </label>
+              <div class="flex gap-3 pt-2">
+                <.button variant="primary" phx-disable-with="Saving...">
+                  {if @editing_alert, do: "Update Alert", else: "Create Alert"}
+                </.button>
+                <button
+                  type="button"
+                  phx-click="hide_form"
+                  class="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </.form>
+          </div>
+
+          <div class="mt-10">
+            <h3 class="text-lg font-semibold text-text-primary mb-4">Your Alerts</h3>
+
+            <div class="space-y-3">
+              <%= if @alerts == [] do %>
+                <div class="flex flex-col items-center justify-center py-12 text-text-tertiary">
+                  <.icon name="hero-bell-slash" class="size-10 mb-3 opacity-50" />
+                  <p class="text-text-secondary font-medium">No alerts yet</p>
+                  <p class="mt-1 text-sm">Create one above to start monitoring.</p>
                 </div>
               <% end %>
-            </div>
 
-            <div class="flex gap-3 pt-2">
-              <.button variant="primary" phx-disable-with="Saving...">
-                {if @editing_alert, do: "Update Alert", else: "Create Alert"}
-              </.button>
-              <button
-                type="button"
-                phx-click="hide_form"
-                class="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+              <div
+                :for={alert <- @alerts}
+                id={"alert-row-#{alert.id}"}
+                class="bg-bg-elevated border border-border-default rounded-lg overflow-hidden"
               >
-                Cancel
-              </button>
-            </div>
-          </.form>
-        </div>
-
-        <div class="mt-10">
-          <h3 class="text-lg font-semibold text-text-primary mb-4">Your Alerts</h3>
-
-          <div class="space-y-3">
-            <%= if @alerts == [] do %>
-              <div class="flex flex-col items-center justify-center py-12 text-text-tertiary">
-                <.icon name="hero-bell-slash" class="size-10 mb-3 opacity-50" />
-                <p class="text-text-secondary font-medium">No alerts yet</p>
-                <p class="mt-1 text-sm">Create one above to start monitoring.</p>
-              </div>
-            <% end %>
-
-            <div
-              :for={alert <- @alerts}
-              id={"alert-row-#{alert.id}"}
-              class="bg-bg-elevated border border-border-default rounded-lg overflow-hidden"
-            >
-              <div class="p-4 hover:bg-bg-surface/50 transition-colors">
-                <div class="flex items-center justify-between">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-3">
-                      <span class="font-medium text-text-primary">{alert.name}</span>
-                      <span class={[
-                        "px-2 py-0.5 rounded text-xs font-medium",
-                        alert.alert_type == "any_match" && "bg-blue-500/10 text-blue-400",
-                        alert.alert_type == "velocity" && "bg-amber-500/10 text-amber-400"
-                      ]}>
-                        {format_alert_type(alert.alert_type)}
-                      </span>
-                      <span
-                        :if={!alert.enabled}
-                        class="px-2 py-0.5 rounded text-xs font-medium bg-red-500/10 text-red-400"
-                      >
-                        DISABLED
-                      </span>
-                    </div>
-                    <div class="mt-1.5 text-sm text-text-tertiary font-mono">
-                      {alert.search_query}
-                    </div>
-                    <div class="mt-1 flex items-center gap-4 text-sm text-text-tertiary">
-                      <%= if alert.alert_type == "velocity" do %>
-                        <span>
-                          ≥ {alert.velocity_threshold} in {format_window(
-                            alert.velocity_window_seconds
-                          )}
+                <div class="p-4 hover:bg-bg-surface/50 transition-colors">
+                  <div class="flex items-center justify-between">
+                    <div class="flex-1">
+                      <div class="flex items-center gap-3">
+                        <span class="font-medium text-text-primary">{alert.name}</span>
+                        <span class={[
+                          "px-2 py-0.5 rounded text-xs font-medium",
+                          alert.alert_type == "any_match" && "bg-blue-500/10 text-blue-400",
+                          alert.alert_type == "velocity" && "bg-amber-500/10 text-amber-400"
+                        ]}>
+                          {format_alert_type(alert.alert_type)}
                         </span>
-                      <% end %>
-                      <span>Cooldown: {format_window(alert.cooldown_seconds)}</span>
-                      <span :if={alert.last_triggered_at}>
-                        Last triggered: {format_relative_time(alert.last_triggered_at)}
-                      </span>
-                      <span class="flex items-center gap-1">
-                        <.icon name="hero-bell" class="size-3" />
-                        {length(alert.notification_channels)} channel(s)
-                      </span>
+                        <span
+                          :if={!alert.enabled}
+                          class="px-2 py-0.5 rounded text-xs font-medium bg-red-500/10 text-red-400"
+                        >
+                          DISABLED
+                        </span>
+                      </div>
+                      <div class="mt-1.5 text-sm text-text-tertiary font-mono">
+                        {alert.search_query}
+                      </div>
+                      <div class="mt-1 flex items-center gap-4 text-sm text-text-tertiary">
+                        <%= if alert.alert_type == "velocity" do %>
+                          <span>
+                            ≥ {alert.velocity_threshold} in {format_window(
+                              alert.velocity_window_seconds
+                            )}
+                          </span>
+                        <% end %>
+                        <span>Cooldown: {format_window(alert.cooldown_seconds)}</span>
+                        <span :if={alert.last_triggered_at}>
+                          Last triggered: {format_relative_time(alert.last_triggered_at)}
+                        </span>
+                        <span class="flex items-center gap-1">
+                          <.icon name="hero-bell" class="size-3" />
+                          {length(alert.notification_channels)} channel(s)
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                    <button
-                      type="button"
-                      phx-click="toggle_history"
-                      phx-value-id={alert.id}
-                      class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
-                    >
-                      History
-                    </button>
-                    <button
-                      type="button"
-                      phx-click="edit_alert"
-                      phx-value-id={alert.id}
-                      class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      phx-click="toggle_enabled"
-                      phx-value-id={alert.id}
-                      class={[
-                        "px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
-                        alert.enabled && "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10",
-                        !alert.enabled && "text-green-400 hover:text-green-300 hover:bg-green-500/10"
-                      ]}
-                    >
-                      {if alert.enabled, do: "Disable", else: "Enable"}
-                    </button>
-                    <button
-                      type="button"
-                      phx-click="delete_alert"
-                      phx-value-id={alert.id}
-                      data-confirm="Are you sure you want to delete this alert?"
-                      class="px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
-                    >
-                      Delete
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <button
+                        type="button"
+                        phx-click="toggle_history"
+                        phx-value-id={alert.id}
+                        class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
+                      >
+                        History
+                      </button>
+                      <button
+                        type="button"
+                        phx-click="edit_alert"
+                        phx-value-id={alert.id}
+                        class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        phx-click="toggle_enabled"
+                        phx-value-id={alert.id}
+                        class={[
+                          "px-3 py-1.5 text-sm font-medium rounded-lg transition-colors",
+                          alert.enabled && "text-amber-400 hover:text-amber-300 hover:bg-amber-500/10",
+                          !alert.enabled &&
+                            "text-green-400 hover:text-green-300 hover:bg-green-500/10"
+                        ]}
+                      >
+                        {if alert.enabled, do: "Disable", else: "Enable"}
+                      </button>
+                      <button
+                        type="button"
+                        phx-click="delete_alert"
+                        phx-value-id={alert.id}
+                        data-confirm="Are you sure you want to delete this alert?"
+                        class="px-3 py-1.5 text-sm font-medium text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded-lg transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <%!-- History Section --%>
-              <div
-                :if={@expanded_history == alert.id}
-                class="border-t border-border-default bg-bg-surface/50 p-4"
-              >
-                <h4 class="text-sm font-medium text-text-primary mb-3">Recent Triggers</h4>
-                <%= if @history_entries == [] do %>
-                  <p class="text-sm text-text-tertiary">No triggers yet.</p>
-                <% else %>
-                  <div class="space-y-2 max-h-64 overflow-y-auto">
-                    <div
-                      :for={entry <- @history_entries}
-                      class="flex items-start gap-3 p-2 bg-bg-base rounded border border-border-default"
-                    >
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 text-sm">
-                          <span class="text-text-primary font-medium">
-                            {format_trigger_type(entry.trigger_type)}
-                          </span>
-                          <span class="text-text-tertiary">
-                            {Calendar.strftime(entry.triggered_at, "%b %d, %Y %H:%M:%S")}
-                          </span>
-                        </div>
-                        <div class="mt-1 text-xs text-text-tertiary font-mono truncate">
-                          {format_trigger_data(entry.trigger_type, entry.trigger_data)}
-                        </div>
-                        <div :if={entry.notifications_sent != []} class="mt-1 flex gap-2">
-                          <span
-                            :for={notif <- entry.notifications_sent}
-                            class={[
-                              "px-1.5 py-0.5 rounded text-xs",
-                              notif["success"] && "bg-green-500/10 text-green-400",
-                              !notif["success"] && "bg-red-500/10 text-red-400"
-                            ]}
-                          >
-                            {notif["channel_name"]}
-                          </span>
+                <%!-- History Section --%>
+                <div
+                  :if={@expanded_history == alert.id}
+                  class="border-t border-border-default bg-bg-surface/50 p-4"
+                >
+                  <h4 class="text-sm font-medium text-text-primary mb-3">Recent Triggers</h4>
+                  <%= if @history_entries == [] do %>
+                    <p class="text-sm text-text-tertiary">No triggers yet.</p>
+                  <% else %>
+                    <div class="space-y-2 max-h-64 overflow-y-auto">
+                      <div
+                        :for={entry <- @history_entries}
+                        class="flex items-start gap-3 p-2 bg-bg-base rounded border border-border-default"
+                      >
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-2 text-sm">
+                            <span class="text-text-primary font-medium">
+                              {format_trigger_type(entry.trigger_type)}
+                            </span>
+                            <span class="text-text-tertiary">
+                              {Calendar.strftime(entry.triggered_at, "%b %d, %Y %H:%M:%S")}
+                            </span>
+                          </div>
+                          <div class="mt-1 text-xs text-text-tertiary font-mono truncate">
+                            {format_trigger_data(entry.trigger_type, entry.trigger_data)}
+                          </div>
+                          <div :if={entry.notifications_sent != []} class="mt-1 flex gap-2">
+                            <span
+                              :for={notif <- entry.notifications_sent}
+                              class={[
+                                "px-1.5 py-0.5 rounded text-xs",
+                                notif["success"] && "bg-green-500/10 text-green-400",
+                                !notif["success"] && "bg-red-500/10 text-red-400"
+                              ]}
+                            >
+                              {notif["channel_name"]}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                <% end %>
+                  <% end %>
+                </div>
               </div>
             </div>
           </div>
         </div>
-      </div>
       </div>
     </Layouts.app>
     """

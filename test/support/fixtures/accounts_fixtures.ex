@@ -63,4 +63,66 @@ defmodule WhisperLogs.AccountsFixtures do
       set: [inserted_at: dt, authenticated_at: dt]
     )
   end
+
+  # ===== Source Fixtures =====
+
+  @doc """
+  Creates an HTTP source (API key based).
+
+  ## Examples
+
+      http_source_fixture(user)
+      http_source_fixture(user, name: "My Source", source: "my-source")
+  """
+  def http_source_fixture(user \\ nil, attrs \\ []) do
+    user = user || user_fixture()
+    name = Keyword.get(attrs, :name, "Test HTTP Source")
+    source = Keyword.get(attrs, :source, "test-source-#{System.unique_integer([:positive])}")
+
+    {:ok, source_record} =
+      Accounts.create_http_source(user, %{
+        name: name,
+        source: source
+      })
+
+    source_record
+  end
+
+  @doc """
+  Creates a syslog source.
+
+  Note: This will attempt to start a listener, which may fail in tests
+  if the port is unavailable. Use high ports (50000+) for test stability.
+
+  ## Examples
+
+      syslog_source_fixture(user)
+      syslog_source_fixture(user, port: 50514, transport: "udp")
+  """
+  def syslog_source_fixture(user \\ nil, attrs \\ []) do
+    user = user || user_fixture()
+    name = Keyword.get(attrs, :name, "Test Syslog Source")
+    source = Keyword.get(attrs, :source, "syslog-source-#{System.unique_integer([:positive])}")
+    port = Keyword.get(attrs, :port) || next_test_port()
+    transport = Keyword.get(attrs, :transport, "udp")
+    auto_register = Keyword.get(attrs, :auto_register_hosts, true)
+
+    {:ok, source_record} =
+      Accounts.create_syslog_source(user, %{
+        name: name,
+        source: source,
+        port: port,
+        transport: transport,
+        auto_register_hosts: auto_register,
+        allowed_hosts: Keyword.get(attrs, :allowed_hosts, [])
+      })
+
+    source_record
+  end
+
+  # Use high ephemeral ports for test stability
+  defp next_test_port do
+    offset = rem(:erlang.unique_integer([:positive, :monotonic]), 10_000)
+    50_000 + offset
+  end
 end
