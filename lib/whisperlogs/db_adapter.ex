@@ -43,7 +43,11 @@ defmodule WhisperLogs.DbAdapter do
   """
   def text_search(pattern) do
     if sqlite?() do
-      dynamic([l], like(l.message, ^pattern) or like(fragment("json(?)", l.metadata), ^pattern))
+      dynamic(
+        [l],
+        fragment("? LIKE ? ESCAPE '\\'", l.message, ^pattern) or
+          fragment("json(?) LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
+      )
     else
       dynamic([l], ilike(l.message, ^pattern) or ilike(fragment("?::text", l.metadata), ^pattern))
     end
@@ -56,7 +60,8 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        not like(l.message, ^pattern) and not like(fragment("json(?)", l.metadata), ^pattern)
+        fragment("? NOT LIKE ? ESCAPE '\\'", l.message, ^pattern) and
+          fragment("json(?) NOT LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
       )
     else
       dynamic(
@@ -108,8 +113,8 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        like(l.source, ^pattern) or
-          like(fragment("json_extract(?, ?)", l.metadata, "$.source"), ^pattern)
+        fragment("? LIKE ? ESCAPE '\\'", l.source, ^pattern) or
+          fragment("json_extract(?, '$.source') LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
       )
     else
       dynamic(
@@ -126,9 +131,9 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        not like(l.source, ^pattern) and
-          (fragment("json_extract(?, ?) IS NULL", l.metadata, "$.source") or
-             not like(fragment("json_extract(?, ?)", l.metadata, "$.source"), ^pattern))
+        fragment("? NOT LIKE ? ESCAPE '\\'", l.source, ^pattern) and
+          (fragment("json_extract(?, '$.source') IS NULL", l.metadata) or
+             fragment("json_extract(?, '$.source') NOT LIKE ? ESCAPE '\\'", l.metadata, ^pattern))
       )
     else
       dynamic(
@@ -223,7 +228,8 @@ defmodule WhisperLogs.DbAdapter do
   def volume_select_hour do
     if sqlite?() do
       dynamic([l], %{
-        timestamp: type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.timestamp), :utc_datetime),
+        timestamp:
+          type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.timestamp), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
@@ -231,7 +237,14 @@ defmodule WhisperLogs.DbAdapter do
       dynamic([l], %{
         timestamp: fragment("date_trunc('hour', ?)", l.timestamp),
         count: count(l.id),
-        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+        bytes:
+          sum(
+            fragment(
+              "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+              l.message,
+              l.metadata
+            )
+          )
       })
     end
   end
@@ -242,7 +255,8 @@ defmodule WhisperLogs.DbAdapter do
   def volume_select_day do
     if sqlite?() do
       dynamic([l], %{
-        timestamp: type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.timestamp), :utc_datetime),
+        timestamp:
+          type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.timestamp), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
@@ -250,7 +264,14 @@ defmodule WhisperLogs.DbAdapter do
       dynamic([l], %{
         timestamp: fragment("date_trunc('day', ?)", l.timestamp),
         count: count(l.id),
-        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+        bytes:
+          sum(
+            fragment(
+              "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+              l.message,
+              l.metadata
+            )
+          )
       })
     end
   end
@@ -261,7 +282,8 @@ defmodule WhisperLogs.DbAdapter do
   def volume_select_month do
     if sqlite?() do
       dynamic([l], %{
-        timestamp: type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.timestamp), :utc_datetime),
+        timestamp:
+          type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.timestamp), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
@@ -269,7 +291,14 @@ defmodule WhisperLogs.DbAdapter do
       dynamic([l], %{
         timestamp: fragment("date_trunc('month', ?)", l.timestamp),
         count: count(l.id),
-        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+        bytes:
+          sum(
+            fragment(
+              "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+              l.message,
+              l.metadata
+            )
+          )
       })
     end
   end
@@ -287,7 +316,14 @@ defmodule WhisperLogs.DbAdapter do
     else
       dynamic([l], %{
         count: count(l.id),
-        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+        bytes:
+          sum(
+            fragment(
+              "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
+              l.message,
+              l.metadata
+            )
+          )
       })
     end
   end
@@ -312,10 +348,17 @@ defmodule WhisperLogs.DbAdapter do
   Case-insensitive LIKE on a JSON extracted value (runtime key).
   """
   def json_ilike_fragment(field_name, key, pattern) when is_atom(field_name) do
+    json_path = "$.#{key}"
+
     if sqlite?() do
       dynamic(
         [l],
-        like(fragment("json_extract(?, ?)", field(l, ^field_name), ^"$.#{key}"), ^pattern)
+        fragment(
+          "json_extract(?, ?) LIKE ? ESCAPE '\\'",
+          field(l, ^field_name),
+          ^json_path,
+          ^pattern
+        )
       )
     else
       dynamic([l], ilike(fragment("?->>?", field(l, ^field_name), ^key), ^pattern))
@@ -448,11 +491,18 @@ defmodule WhisperLogs.DbAdapter do
   Exclude metadata ILIKE - matches if key is NULL or value doesn't match pattern.
   """
   def json_not_ilike_fragment(field_name, key, pattern) when is_atom(field_name) do
+    json_path = "$.#{key}"
+
     if sqlite?() do
       dynamic(
         [l],
-        fragment("json_extract(?, ?) IS NULL", field(l, ^field_name), ^"$.#{key}") or
-          not like(fragment("json_extract(?, ?)", field(l, ^field_name), ^"$.#{key}"), ^pattern)
+        fragment("json_extract(?, ?) IS NULL", field(l, ^field_name), ^json_path) or
+          fragment(
+            "json_extract(?, ?) NOT LIKE ? ESCAPE '\\'",
+            field(l, ^field_name),
+            ^json_path,
+            ^pattern
+          )
       )
     else
       dynamic(
