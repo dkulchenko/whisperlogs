@@ -26,7 +26,8 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="max-w-4xl mx-auto px-6 py-8">
+      <div class="flex-1 overflow-y-auto">
+        <div class="max-w-4xl mx-auto px-6 py-8">
         <.header>
           Notification Channels
           <:subtitle>
@@ -264,6 +265,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
             </div>
           </div>
         </div>
+      </div>
       </div>
     </Layouts.app>
     """

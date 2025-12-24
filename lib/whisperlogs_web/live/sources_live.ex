@@ -32,7 +32,8 @@ defmodule WhisperLogsWeb.SourcesLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="max-w-4xl mx-auto px-6 py-8">
+      <div class="flex-1 overflow-y-auto">
+        <div class="max-w-4xl mx-auto px-6 py-8">
         <.header>
           Sources
           <:subtitle>
@@ -267,6 +268,7 @@ defmodule WhisperLogsWeb.SourcesLive do
             </div>
           </div>
         </div>
+      </div>
       </div>
     </Layouts.app>
     """

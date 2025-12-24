@@ -241,6 +241,40 @@ defmodule WhisperLogs.Accounts do
     :ok
   end
 
+  @doc """
+  Deletes expired tokens from the database.
+  Used by retention cleanup.
+
+  Token expiry periods:
+  - Session tokens: 14 days
+  - Magic link tokens: 15 minutes
+  - Change email tokens: 7 days
+  """
+  def delete_expired_tokens do
+    now = DateTime.utc_now()
+
+    # Delete expired session tokens (14 days)
+    session_cutoff = DateTime.add(now, -14, :day)
+
+    # Delete expired magic link tokens (15 minutes)
+    magic_link_cutoff = DateTime.add(now, -15, :minute)
+
+    # Delete expired change email tokens (7 days)
+    change_email_cutoff = DateTime.add(now, -7, :day)
+
+    {count, _} =
+      UserToken
+      |> where(
+        [t],
+        (t.context == "session" and t.inserted_at < ^session_cutoff) or
+          (t.context == "login" and t.inserted_at < ^magic_link_cutoff) or
+          (t.context != "session" and t.context != "login" and t.inserted_at < ^change_email_cutoff)
+      )
+      |> Repo.delete_all()
+
+    {count, nil}
+  end
+
   ## Token helper
 
   defp update_user_and_delete_all_tokens(changeset) do

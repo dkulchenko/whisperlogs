@@ -84,6 +84,9 @@ defmodule WhisperLogs.Repo do
   def reload(struct_or_structs, opts \\ []), do: impl().reload(struct_or_structs, opts)
   def reload!(struct_or_structs, opts \\ []), do: impl().reload!(struct_or_structs, opts)
 
+  # Stream function (must be used within a transaction)
+  def stream(queryable, opts \\ []), do: impl().stream(queryable, opts)
+
   # Transaction functions
   def transaction(fun_or_multi, opts \\ []), do: impl().transaction(fun_or_multi, opts)
   def transact(fun, opts \\ []), do: impl().transact(fun, opts)

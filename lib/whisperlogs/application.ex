@@ -26,6 +26,8 @@ defmodule WhisperLogs.Application do
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
       # ETS cache for source auth (must start before Endpoint)
       WhisperLogs.SourceCache,
+      # Export scheduler (runs before retention to archive before deletion)
+      WhisperLogs.Exports.Scheduler,
       # Log retention cleanup
       WhisperLogs.Retention,
       # Alert evaluation

@@ -72,6 +72,12 @@ defmodule WhisperLogsWeb.Layouts do
                 >
                   Alerts
                 </.link>
+                <.link
+                  navigate={~p"/exports"}
+                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                >
+                  Exports
+                </.link>
               </nav>
             <% end %>
           </div>

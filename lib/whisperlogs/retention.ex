@@ -1,17 +1,24 @@
 defmodule WhisperLogs.Retention do
   @moduledoc """
-  GenServer that periodically cleans up old logs based on retention policy.
+  GenServer that periodically cleans up old data.
 
-  Runs cleanup daily, deleting logs older than the configured retention period.
-  Default retention is 30 days, configurable via WHISPERLOGS_RETENTION_DAYS env var.
+  Runs cleanup daily:
+  - Logs older than retention period (default 30 days, configurable via WHISPERLOGS_RETENTION_DAYS)
+  - Export jobs older than 90 days
+  - Alert history older than 90 days
+  - Expired user tokens (session: 14 days, magic link: 15 min, email change: 7 days)
   """
   use GenServer
 
   require Logger
 
   alias WhisperLogs.Logs
+  alias WhisperLogs.Alerts
+  alias WhisperLogs.Exports
+  alias WhisperLogs.Accounts
 
   @default_retention_days 30
+  @history_retention_days 90
   @cleanup_interval :timer.hours(24)
 
   def start_link(opts) do
@@ -33,14 +40,34 @@ defmodule WhisperLogs.Retention do
   end
 
   defp run_cleanup(retention_days) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-retention_days, :day)
+    # Clean up old logs
+    log_cutoff = DateTime.utc_now() |> DateTime.add(-retention_days, :day)
 
-    case Logs.delete_before(cutoff) do
+    case Logs.delete_before(log_cutoff) do
       {0, _} ->
         Logger.debug("Retention cleanup: no logs to delete")
 
       {count, _} ->
         Logger.info("Retention cleanup: deleted #{count} logs older than #{retention_days} days")
+    end
+
+    # Clean up old export jobs and alert history
+    history_cutoff = DateTime.utc_now() |> DateTime.add(-@history_retention_days, :day)
+
+    case Exports.delete_jobs_before(history_cutoff) do
+      {0, _} -> :ok
+      {count, _} -> Logger.info("Retention cleanup: deleted #{count} old export jobs")
+    end
+
+    case Alerts.delete_history_before(history_cutoff) do
+      {0, _} -> :ok
+      {count, _} -> Logger.info("Retention cleanup: deleted #{count} old alert history entries")
+    end
+
+    # Clean up expired user tokens
+    case Accounts.delete_expired_tokens() do
+      {0, _} -> :ok
+      {count, _} -> Logger.info("Retention cleanup: deleted #{count} expired user tokens")
     end
   rescue
     error ->

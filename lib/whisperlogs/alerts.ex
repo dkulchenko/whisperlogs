@@ -210,6 +210,16 @@ defmodule WhisperLogs.Alerts do
     |> Repo.insert()
   end
 
+  @doc """
+  Deletes alert history entries older than the given cutoff datetime.
+  Used by retention cleanup.
+  """
+  def delete_history_before(%DateTime{} = cutoff) do
+    AlertHistory
+    |> where([h], h.triggered_at < ^cutoff)
+    |> Repo.delete_all()
+  end
+
   # ===== Helper Functions =====
 
   defp attach_channels(%Alert{id: alert_id}, channel_ids) when is_list(channel_ids) do

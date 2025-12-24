@@ -45,7 +45,8 @@ defmodule WhisperLogsWeb.AlertsLive do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="max-w-4xl mx-auto px-6 py-8">
+      <div class="flex-1 overflow-y-auto">
+        <div class="max-w-4xl mx-auto px-6 py-8">
         <.header>
           Alerts
           <:subtitle>
@@ -406,6 +407,7 @@ defmodule WhisperLogsWeb.AlertsLive do
           </div>
         </div>
       </div>
+      </div>
     </Layouts.app>
     """
   end
@@ -589,7 +591,7 @@ defmodule WhisperLogsWeb.AlertsLive do
           {:noreply, put_flash(socket, :error, "Alert not found")}
 
         alert ->
-          history = Alerts.list_alert_history(alert, limit: 20)
+          history = Alerts.list_alert_history(alert, limit: 10)
 
           {:noreply,
            socket
