@@ -47,25 +47,43 @@ if config_env() == :prod do
   end
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
-  # A default value is used in config/dev.exs and config/test.exs but you
-  # want to use a different value for prod and you most likely don't want
-  # to check this value into version control, so we use an environment
-  # variable instead.
+  # In SQLite mode (local/single-user), we auto-generate one for zero-config experience.
+  # In PostgreSQL mode (production), require it to be set explicitly.
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
-      raise """
-      environment variable SECRET_KEY_BASE is missing.
-      You can generate one by calling: mix phx.gen.secret
-      """
+      if adapter == :sqlite do
+        # Auto-generate for SQLite mode - sessions won't persist across restarts
+        # but that's acceptable for local single-user deployments
+        :crypto.strong_rand_bytes(64) |> Base.encode64()
+      else
+        raise """
+        environment variable SECRET_KEY_BASE is missing.
+        You can generate one by calling: mix phx.gen.secret
+        """
+      end
 
-  host = System.get_env("PHX_HOST") || "example.com"
+  host = System.get_env("PHX_HOST") || "localhost"
 
   config :whisperlogs, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
   port = String.to_integer(System.get_env("PORT") || "4050")
 
+  # URL config: use HTTPS/443 when behind a reverse proxy, otherwise HTTP with actual port
+  {url_scheme, url_port} =
+    if System.get_env("PHX_HOST") do
+      # Custom host set - assume behind reverse proxy with HTTPS
+      {"https", 443}
+    else
+      # Standalone mode - use HTTP with actual port
+      {"http", port}
+    end
+
+  # In standalone mode, disable origin checking since users may access via various hostnames
+  check_origin = if System.get_env("PHX_HOST"), do: true, else: false
+
   config :whisperlogs, WhisperLogsWeb.Endpoint,
-    url: [host: host, port: 443, scheme: "https"],
+    url: [host: host, port: url_port, scheme: url_scheme],
+    check_origin: check_origin,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.

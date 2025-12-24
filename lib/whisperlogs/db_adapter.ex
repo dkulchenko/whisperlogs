@@ -215,6 +215,83 @@ defmodule WhisperLogs.DbAdapter do
     end
   end
 
+  @doc """
+  Returns complete volume select as a single dynamic for hourly aggregation.
+  Must be interpolated at top level: `select([l], ^volume_select_hour())`
+  Returns %{timestamp, count, bytes} map.
+  """
+  def volume_select_hour do
+    if sqlite?() do
+      dynamic([l], %{
+        timestamp: type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.timestamp), :utc_datetime),
+        count: count(l.id),
+        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+      })
+    else
+      dynamic([l], %{
+        timestamp: fragment("date_trunc('hour', ?)", l.timestamp),
+        count: count(l.id),
+        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+      })
+    end
+  end
+
+  @doc """
+  Returns complete volume select as a single dynamic for daily aggregation.
+  """
+  def volume_select_day do
+    if sqlite?() do
+      dynamic([l], %{
+        timestamp: type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.timestamp), :utc_datetime),
+        count: count(l.id),
+        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+      })
+    else
+      dynamic([l], %{
+        timestamp: fragment("date_trunc('day', ?)", l.timestamp),
+        count: count(l.id),
+        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+      })
+    end
+  end
+
+  @doc """
+  Returns complete volume select as a single dynamic for monthly aggregation.
+  """
+  def volume_select_month do
+    if sqlite?() do
+      dynamic([l], %{
+        timestamp: type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.timestamp), :utc_datetime),
+        count: count(l.id),
+        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+      })
+    else
+      dynamic([l], %{
+        timestamp: fragment("date_trunc('month', ?)", l.timestamp),
+        count: count(l.id),
+        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+      })
+    end
+  end
+
+  @doc """
+  Returns complete volume select as a single dynamic for total aggregation.
+  Returns %{count, bytes} map.
+  """
+  def volume_select_total do
+    if sqlite?() do
+      dynamic([l], %{
+        count: count(l.id),
+        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+      })
+    else
+      dynamic([l], %{
+        count: count(l.id),
+        bytes: sum(fragment("octet_length(?) + octet_length(coalesce(?::text, '{}'))", l.message, l.metadata))
+      })
+    end
+  end
+
   # ===========================================================================
   # JSON Field Helpers (for runtime key access)
   # ===========================================================================

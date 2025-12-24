@@ -106,10 +106,12 @@ defmodule WhisperLogs.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind whisperlogs", "esbuild whisperlogs"],
       "assets.deploy": [
+        "compile",
         "tailwind whisperlogs --minify",
         "esbuild whisperlogs --minify",
         "phx.digest"
       ],
+      release: ["assets.deploy", "release"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end

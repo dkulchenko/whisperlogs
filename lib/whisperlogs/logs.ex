@@ -407,20 +407,29 @@ defmodule WhisperLogs.Logs do
   end
 
   @doc """
+  Returns the timestamp of the oldest log in the database.
+  Returns nil if no logs exist.
+  """
+  def oldest_log_timestamp do
+    Repo.aggregate(Log, :min, :timestamp)
+  end
+
+  @doc """
   Returns hourly log volume for the past N hours.
   Returns list of `{datetime, count, bytes}` tuples.
   """
   def volume_by_hour(hours \\ 48) do
     cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
     trunc = DbAdapter.trunc_hour()
-    byte_size = DbAdapter.log_byte_size()
+    volume_select = DbAdapter.volume_select_hour()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
     |> group_by([l], ^trunc)
-    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
     |> Repo.all()
+    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
   end
 
   @doc """
@@ -430,14 +439,15 @@ defmodule WhisperLogs.Logs do
   def volume_by_day(days \\ 30) do
     cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
     trunc = DbAdapter.trunc_day()
-    byte_size = DbAdapter.log_byte_size()
+    volume_select = DbAdapter.volume_select_day()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
     |> group_by([l], ^trunc)
-    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
     |> Repo.all()
+    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
   end
 
   @doc """
@@ -447,14 +457,15 @@ defmodule WhisperLogs.Logs do
   def volume_by_month(months \\ 12) do
     cutoff = DateTime.utc_now() |> DateTime.add(-months * 30, :day)
     trunc = DbAdapter.trunc_month()
-    byte_size = DbAdapter.log_byte_size()
+    volume_select = DbAdapter.volume_select_month()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
     |> group_by([l], ^trunc)
-    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
     |> Repo.all()
+    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
   end
 
   @doc """
@@ -463,17 +474,18 @@ defmodule WhisperLogs.Logs do
   """
   def volume_last_n_hours(hours) do
     cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
-    byte_size = DbAdapter.log_byte_size()
+    volume_select = DbAdapter.volume_select_total()
 
     result =
       Log
       |> where([l], l.timestamp >= ^cutoff)
-      |> select([l], {count(l.id), sum(^byte_size)})
+      |> select([l], ^volume_select)
       |> Repo.one()
 
     case result do
-      {nil, nil} -> {0, 0}
-      {count, bytes} -> {count, bytes || 0}
+      nil -> {0, 0}
+      %{count: nil, bytes: nil} -> {0, 0}
+      %{count: count, bytes: bytes} -> {count, bytes || 0}
     end
   end
 

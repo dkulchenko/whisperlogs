@@ -6,17 +6,17 @@ import Config
 # which you should run after static files are built and
 # before starting your production server.
 config :whisperlogs, WhisperLogsWeb.Endpoint,
-  cache_static_manifest: "priv/static/cache_manifest.json"
+  cache_static_manifest: "priv/static/cache_manifest.json",
+  # Disable detailed error pages in production - show generic errors only
+  debug_errors: false
 
-# Force using SSL in production. This also sets the "strict-security-transport" header,
-# known as HSTS. If you have a health check endpoint, you may want to exclude it below.
-# Note `:force_ssl` is required to be set at compile-time.
-config :whisperlogs, WhisperLogsWeb.Endpoint,
-  force_ssl: [rewrite_on: [:x_forwarded_proto]],
-  exclude: [
-    # paths: ["/health"],
-    hosts: ["localhost", "127.0.0.1"]
-  ]
+# SSL is handled by reverse proxy in production deployments.
+# For standalone/SQLite mode, we don't force SSL since it's typically local.
+# Uncomment below if you want to force SSL (requires proper cert setup):
+#
+# config :whisperlogs, WhisperLogsWeb.Endpoint,
+#   force_ssl: [rewrite_on: [:x_forwarded_proto]],
+#   exclude: [hosts: ["localhost", "127.0.0.1"]]
 
 # Configure Swoosh API Client
 config :swoosh, api_client: Swoosh.ApiClient.Req

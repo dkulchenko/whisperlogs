@@ -13,13 +13,8 @@ defmodule WhisperLogsWeb.MetricsLive do
     daily_data = Logs.volume_by_day(30)
     monthly_data = Logs.volume_by_month(12)
 
-    # Calculate projections based on last 48 hours
-    {recent_count, recent_bytes} = Logs.volume_last_n_hours(48)
-    hourly_avg_count = if recent_count > 0, do: recent_count / 48, else: 0
-    hourly_avg_bytes = if recent_bytes > 0, do: recent_bytes / 48, else: 0
-
-    projected_30d_count = round(hourly_avg_count * 24 * 30)
-    projected_30d_bytes = round(hourly_avg_bytes * 24 * 30)
+    # Calculate projections based on actual data velocity
+    {projected_30d_count, projected_30d_bytes} = calculate_30d_projection()
 
     # Calculate total stored volume from all data
     total_bytes =
@@ -299,6 +294,35 @@ defmodule WhisperLogsWeb.MetricsLive do
   @impl true
   def handle_event("set_time_range", %{"range" => range}, socket) do
     {:noreply, assign(socket, :time_range, range)}
+  end
+
+  # Calculate 30-day projection based on actual data velocity.
+  # Uses up to the last 48 hours of data, but correctly handles cases
+  # where less data exists (e.g., only 2 hours since first log).
+  defp calculate_30d_projection do
+    now = DateTime.utc_now()
+    oldest = Logs.oldest_log_timestamp()
+
+    case oldest do
+      nil ->
+        # No logs yet
+        {0, 0}
+
+      oldest_ts ->
+        # Calculate actual hours of data we have (capped at 48 for stability)
+        hours_of_data = DateTime.diff(now, oldest_ts, :second) / 3600
+        sample_hours = min(hours_of_data, 48) |> max(1)
+
+        # Get volume for the sample period
+        {count, bytes} = Logs.volume_last_n_hours(ceil(sample_hours))
+
+        # Calculate hourly velocity based on actual data span
+        hourly_avg_count = count / sample_hours
+        hourly_avg_bytes = bytes / sample_hours
+
+        # Extrapolate to 30 days
+        {round(hourly_avg_count * 24 * 30), round(hourly_avg_bytes * 24 * 30)}
+    end
   end
 
   defp format_count(nil), do: "0"
