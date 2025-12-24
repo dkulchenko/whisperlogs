@@ -19,7 +19,7 @@ The easiest way to run WhisperLogs is using the standalone executable:
 whisperlogs_windows.exe  # Windows
 ```
 
-3. Open http://localhost:4000 in your browser
+3. Open http://localhost:4050 in your browser
 4. Register the first user account
 
 That's it! WhisperLogs automatically creates a SQLite database and runs migrations on first start.
@@ -164,7 +164,7 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
 | `SECRET_KEY_BASE` | - | Required for session encryption in production |
 | `PHX_HOST` | `localhost` | Server hostname |
-| `PORT` | `4000` | Web server port |
+| `PORT` | `4050` | Web server port |
 | `POOL_SIZE` | `10` | Database connection pool size |
 
 ## Features
@@ -201,7 +201,7 @@ mix phx.server
 iex -S mix phx.server
 ```
 
-Open http://localhost:4000
+Open http://localhost:4050
 
 ### Running Tests
 
