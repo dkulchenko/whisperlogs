@@ -111,7 +111,7 @@ defmodule WhisperLogs.MixProject do
         "esbuild whisperlogs --minify",
         "phx.digest"
       ],
-      release: ["assets.deploy", "release"],
+      release: ["assets.deploy", "release", "phx.digest.clean --all"],
       precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
     ]
   end
