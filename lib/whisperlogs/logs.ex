@@ -4,6 +4,8 @@ defmodule WhisperLogs.Logs do
   """
 
   import Ecto.Query, warn: false
+
+  alias WhisperLogs.DbAdapter
   alias WhisperLogs.Repo
   alias WhisperLogs.Logs.Log
   alias WhisperLogs.Logs.SearchParser
@@ -253,196 +255,64 @@ defmodule WhisperLogs.Logs do
   # Plain term: search message OR any metadata value
   defp apply_search_token({:term, term}, query) do
     pattern = SearchParser.escape_like(term)
-
-    where(
-      query,
-      [l],
-      ilike(l.message, ^pattern) or
-        fragment("?::text ILIKE ?", l.metadata, ^pattern)
-    )
+    where(query, ^DbAdapter.text_search(pattern))
   end
 
   # Quoted phrase: same as term but preserves spaces
   defp apply_search_token({:phrase, phrase}, query) do
     pattern = SearchParser.escape_like(phrase)
-
-    where(
-      query,
-      [l],
-      ilike(l.message, ^pattern) or
-        fragment("?::text ILIKE ?", l.metadata, ^pattern)
-    )
+    where(query, ^DbAdapter.text_search(pattern))
   end
 
   # Exclude term: NOT in message AND NOT in metadata
   defp apply_search_token({:exclude, term}, query) do
     pattern = SearchParser.escape_like(term)
-
-    where(
-      query,
-      [l],
-      not ilike(l.message, ^pattern) and
-        not fragment("?::text ILIKE ?", l.metadata, ^pattern)
-    )
+    where(query, ^DbAdapter.text_exclude(pattern))
   end
 
   # Metadata key:value filter (equality with ILIKE)
   defp apply_search_token({:metadata, key, :eq, value}, query) do
     pattern = SearchParser.escape_like(value)
-    where(query, [l], fragment("?->>? ILIKE ?", l.metadata, ^key, ^pattern))
+    where(query, ^DbAdapter.json_ilike_fragment(:metadata, key, pattern))
   end
 
   # Metadata numeric comparisons: key:>value, key:>=value, key:<value, key:<=value
-  defp apply_search_token({:metadata, key, :gt, value}, query) do
+  defp apply_search_token({:metadata, key, op, value}, query)
+       when op in [:gt, :gte, :lt, :lte] do
     case parse_numeric(value) do
       {:ok, num} ->
-        where(query, [l], fragment("NULLIF(?->>?, '')::numeric > ?", l.metadata, ^key, ^num))
+        where(query, ^DbAdapter.json_numeric_compare(:metadata, key, op, num))
 
       :error ->
-        where(query, [l], false)
-    end
-  end
-
-  defp apply_search_token({:metadata, key, :gte, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(query, [l], fragment("NULLIF(?->>?, '')::numeric >= ?", l.metadata, ^key, ^num))
-
-      :error ->
-        where(query, [l], false)
-    end
-  end
-
-  defp apply_search_token({:metadata, key, :lt, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(query, [l], fragment("NULLIF(?->>?, '')::numeric < ?", l.metadata, ^key, ^num))
-
-      :error ->
-        where(query, [l], false)
-    end
-  end
-
-  defp apply_search_token({:metadata, key, :lte, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(query, [l], fragment("NULLIF(?->>?, '')::numeric <= ?", l.metadata, ^key, ^num))
-
-      :error ->
-        where(query, [l], false)
+        where(query, false)
     end
   end
 
   # Exclude metadata key:value (equality)
   defp apply_search_token({:exclude_metadata, key, :eq, value}, query) do
     pattern = SearchParser.escape_like(value)
-
-    where(
-      query,
-      [l],
-      fragment(
-        "(?->>? IS NULL OR ?->>? NOT ILIKE ?)",
-        l.metadata,
-        ^key,
-        l.metadata,
-        ^key,
-        ^pattern
-      )
-    )
+    where(query, ^DbAdapter.json_not_ilike_fragment(:metadata, key, pattern))
   end
 
   # Exclude metadata numeric comparisons (negate the operator)
-  defp apply_search_token({:exclude_metadata, key, :gt, value}, query) do
+  defp apply_search_token({:exclude_metadata, key, op, value}, query)
+       when op in [:gt, :gte, :lt, :lte] do
     case parse_numeric(value) do
       {:ok, num} ->
-        where(
-          query,
-          [l],
-          fragment(
-            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric <= ?)",
-            l.metadata,
-            ^key,
-            l.metadata,
-            ^key,
-            ^num
-          )
-        )
+        where(query, ^DbAdapter.json_numeric_exclude(:metadata, key, op, num))
 
       :error ->
         query
     end
   end
 
-  defp apply_search_token({:exclude_metadata, key, :gte, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(
-          query,
-          [l],
-          fragment(
-            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric < ?)",
-            l.metadata,
-            ^key,
-            l.metadata,
-            ^key,
-            ^num
-          )
-        )
-
-      :error ->
-        query
-    end
-  end
-
-  defp apply_search_token({:exclude_metadata, key, :lt, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(
-          query,
-          [l],
-          fragment(
-            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric >= ?)",
-            l.metadata,
-            ^key,
-            l.metadata,
-            ^key,
-            ^num
-          )
-        )
-
-      :error ->
-        query
-    end
-  end
-
-  defp apply_search_token({:exclude_metadata, key, :lte, value}, query) do
-    case parse_numeric(value) do
-      {:ok, num} ->
-        where(
-          query,
-          [l],
-          fragment(
-            "(?->>? IS NULL OR NULLIF(?->>?, '')::numeric > ?)",
-            l.metadata,
-            ^key,
-            l.metadata,
-            ^key,
-            ^num
-          )
-        )
-
-      :error ->
-        query
-    end
-  end
-
-  # Level filter - exact match on level field
+  # Level filter - exact match on level field OR metadata.level
   defp apply_search_token({:level_filter, level}, query) do
-    where(query, [l], l.level == ^level)
+    where(query, ^DbAdapter.level_eq(level))
   end
 
   defp apply_search_token({:exclude_level_filter, level}, query) do
-    where(query, [l], l.level != ^level)
+    where(query, ^DbAdapter.level_neq(level))
   end
 
   # Timestamp filter - comparison on timestamp field
@@ -493,22 +363,22 @@ defmodule WhisperLogs.Logs do
     where(query, [l], l.timestamp > ^datetime)
   end
 
-  # Source filter - ILIKE pattern match on source field
+  # Source filter - ILIKE pattern match on source field OR metadata.source
   defp apply_search_token({:source_filter, pattern}, query) do
     like_pattern = SearchParser.escape_like(pattern)
-    where(query, [l], ilike(l.source, ^like_pattern))
+    where(query, ^DbAdapter.source_match(like_pattern))
   end
 
   defp apply_search_token({:exclude_source_filter, pattern}, query) do
     like_pattern = SearchParser.escape_like(pattern)
-    where(query, [l], not ilike(l.source, ^like_pattern))
+    where(query, ^DbAdapter.source_exclude(like_pattern))
   end
 
   defp filter_request_id(query, nil), do: query
   defp filter_request_id(query, ""), do: query
 
   defp filter_request_id(query, request_id) do
-    where(query, [l], fragment("?->>'request_id' = ?", l.metadata, ^request_id))
+    where(query, ^DbAdapter.request_id_eq(request_id))
   end
 
   @doc """
@@ -542,22 +412,14 @@ defmodule WhisperLogs.Logs do
   """
   def volume_by_hour(hours \\ 48) do
     cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
+    trunc = DbAdapter.trunc_hour()
+    byte_size = DbAdapter.log_byte_size()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
-    |> group_by([l], fragment("date_trunc('hour', ?)", l.timestamp))
-    |> select([l], {
-      fragment("date_trunc('hour', ?)", l.timestamp),
-      count(l.id),
-      sum(
-        fragment(
-          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
-          l.message,
-          l.metadata
-        )
-      )
-    })
-    |> order_by([l], asc: fragment("date_trunc('hour', ?)", l.timestamp))
+    |> group_by([l], ^trunc)
+    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> order_by(^[asc: trunc])
     |> Repo.all()
   end
 
@@ -567,22 +429,14 @@ defmodule WhisperLogs.Logs do
   """
   def volume_by_day(days \\ 30) do
     cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
+    trunc = DbAdapter.trunc_day()
+    byte_size = DbAdapter.log_byte_size()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
-    |> group_by([l], fragment("date_trunc('day', ?)", l.timestamp))
-    |> select([l], {
-      fragment("date_trunc('day', ?)", l.timestamp),
-      count(l.id),
-      sum(
-        fragment(
-          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
-          l.message,
-          l.metadata
-        )
-      )
-    })
-    |> order_by([l], asc: fragment("date_trunc('day', ?)", l.timestamp))
+    |> group_by([l], ^trunc)
+    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> order_by(^[asc: trunc])
     |> Repo.all()
   end
 
@@ -592,22 +446,14 @@ defmodule WhisperLogs.Logs do
   """
   def volume_by_month(months \\ 12) do
     cutoff = DateTime.utc_now() |> DateTime.add(-months * 30, :day)
+    trunc = DbAdapter.trunc_month()
+    byte_size = DbAdapter.log_byte_size()
 
     Log
     |> where([l], l.timestamp >= ^cutoff)
-    |> group_by([l], fragment("date_trunc('month', ?)", l.timestamp))
-    |> select([l], {
-      fragment("date_trunc('month', ?)", l.timestamp),
-      count(l.id),
-      sum(
-        fragment(
-          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
-          l.message,
-          l.metadata
-        )
-      )
-    })
-    |> order_by([l], asc: fragment("date_trunc('month', ?)", l.timestamp))
+    |> group_by([l], ^trunc)
+    |> select([l], {^trunc, count(l.id), sum(^byte_size)})
+    |> order_by(^[asc: trunc])
     |> Repo.all()
   end
 
@@ -617,21 +463,15 @@ defmodule WhisperLogs.Logs do
   """
   def volume_last_n_hours(hours) do
     cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
+    byte_size = DbAdapter.log_byte_size()
 
-    Log
-    |> where([l], l.timestamp >= ^cutoff)
-    |> select([l], {
-      count(l.id),
-      sum(
-        fragment(
-          "octet_length(?) + octet_length(coalesce(?::text, '{}'))",
-          l.message,
-          l.metadata
-        )
-      )
-    })
-    |> Repo.one()
-    |> case do
+    result =
+      Log
+      |> where([l], l.timestamp >= ^cutoff)
+      |> select([l], {count(l.id), sum(^byte_size)})
+      |> Repo.one()
+
+    case result do
       {nil, nil} -> {0, 0}
       {count, bytes} -> {count, bytes || 0}
     end

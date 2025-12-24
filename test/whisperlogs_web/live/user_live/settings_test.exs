@@ -1,6 +1,9 @@
 defmodule WhisperLogsWeb.UserLive.SettingsTest do
   use WhisperLogsWeb.ConnCase, async: true
 
+  # Multi-user auth tests only apply to PostgreSQL mode
+  @moduletag :postgres_only
+
   alias WhisperLogs.Accounts
   import Phoenix.LiveViewTest
   import WhisperLogs.AccountsFixtures

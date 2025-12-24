@@ -3,9 +3,12 @@ defmodule WhisperLogsWeb.UserAuth do
 
   import Plug.Conn
   import Phoenix.Controller
+  import Ecto.Query
 
   alias WhisperLogs.Accounts
   alias WhisperLogs.Accounts.Scope
+  alias WhisperLogs.DbAdapter
+  alias WhisperLogs.Repo
 
   # Make the remember me cookie valid for 14 days. This should match
   # the session validity setting in UserToken.
@@ -63,16 +66,35 @@ defmodule WhisperLogsWeb.UserAuth do
   Authenticates the user by looking into the session and remember me token.
 
   Will reissue the session token if it is older than the configured age.
+
+  In SQLite mode (single-user), always returns an anonymous scope that
+  bypasses authentication.
   """
   def fetch_current_scope_for_user(conn, _opts) do
-    with {token, conn} <- ensure_user_token(conn),
-         {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
-      conn
-      |> assign(:current_scope, Scope.for_user(user))
-      |> maybe_reissue_user_session_token(user, token_inserted_at)
+    # In SQLite mode, bypass authentication entirely - single-user mode
+    if DbAdapter.sqlite?() do
+      assign(conn, :current_scope, sqlite_scope())
     else
-      nil -> assign(conn, :current_scope, Scope.for_user(nil))
+      with {token, conn} <- ensure_user_token(conn),
+           {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
+        conn
+        |> assign(:current_scope, Scope.for_user(user))
+        |> maybe_reissue_user_session_token(user, token_inserted_at)
+      else
+        nil -> assign(conn, :current_scope, Scope.for_user(nil))
+      end
     end
+  end
+
+  # Returns the scope for SQLite single-user mode using the default local user
+  defp sqlite_scope do
+    %Scope{user: get_default_user()}
+  end
+
+  # Fetches the default local user for SQLite mode
+  # This user is created on startup by WhisperLogs.Release
+  defp get_default_user do
+    Repo.one!(from u in Accounts.User, where: u.email == "local@localhost", limit: 1)
   end
 
   defp ensure_user_token(conn) do
@@ -247,12 +269,17 @@ defmodule WhisperLogsWeb.UserAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      {user, _} =
-        if user_token = session["user_token"] do
-          Accounts.get_user_by_session_token(user_token)
-        end || {nil, nil}
+      # In SQLite mode, bypass authentication - single-user mode
+      if DbAdapter.sqlite?() do
+        sqlite_scope()
+      else
+        {user, _} =
+          if user_token = session["user_token"] do
+            Accounts.get_user_by_session_token(user_token)
+          end || {nil, nil}
 
-      Scope.for_user(user)
+        Scope.for_user(user)
+      end
     end)
   end
 

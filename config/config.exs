@@ -20,6 +20,10 @@ config :whisperlogs, :scopes,
     test_setup_helper: :register_and_log_in_user
   ]
 
+# Database adapter is set at runtime in runtime.exs based on DATABASE_URL
+# Default to :sqlite for compile-time (macros, etc.) - runtime.exs overrides
+config :whisperlogs, :db_adapter, :sqlite
+
 config :whisperlogs,
   namespace: WhisperLogs,
   ecto_repos: [WhisperLogs.Repo],

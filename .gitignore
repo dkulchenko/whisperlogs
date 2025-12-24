@@ -38,3 +38,7 @@ npm-debug.log
 # Burrito build output
 /burrito_out/
 
+# Development and test databases (SQLite)
+/priv/*.db
+/priv/*.db-*
+

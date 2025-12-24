@@ -1,5 +1,6 @@
 defmodule WhisperLogs.Repo.Migrations.CreateLogs do
   use Ecto.Migration
+  import WhisperLogs.MigrationHelpers
 
   def change do
     create table(:logs) do
@@ -17,6 +18,10 @@ defmodule WhisperLogs.Repo.Migrations.CreateLogs do
     create index(:logs, [:source])
     create index(:logs, [:level])
     create index(:logs, [:request_id], where: "request_id IS NOT NULL")
-    create index(:logs, [:metadata], using: :gin)
+
+    # GIN index only available in PostgreSQL
+    if postgres?() do
+      create index(:logs, [:metadata], using: :gin)
+    end
   end
 end

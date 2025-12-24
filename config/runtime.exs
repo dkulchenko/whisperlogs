@@ -7,28 +7,44 @@ import Config
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
 
+# Determine database adapter at runtime based on DATABASE_URL
+# This must be set before any Repo config and before the app starts
+adapter = if System.get_env("DATABASE_URL"), do: :postgres, else: :sqlite
+config :whisperlogs, :db_adapter, adapter
+
 # Always start the server in production mode (for releases/Burrito builds)
 if config_env() == :prod do
   config :whisperlogs, WhisperLogsWeb.Endpoint, server: true
 end
 
 if config_env() == :prod do
-  database_url =
-    System.get_env("DATABASE_URL") ||
-      raise """
-      environment variable DATABASE_URL is missing.
-      For example: ecto://USER:PASS@HOST/DATABASE
-      """
+  # Database configuration: PostgreSQL if DATABASE_URL is set, otherwise SQLite
+  if database_url = System.get_env("DATABASE_URL") do
+    maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
-  maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
+    config :whisperlogs, WhisperLogs.Repo.Postgres,
+      # ssl: true,
+      url: database_url,
+      pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
+      socket_options: maybe_ipv6
+  else
+    # SQLite mode - use XDG_DATA_HOME (defaults to ~/.local/share)
+    db_path =
+      System.get_env("DATABASE_PATH") ||
+        Path.join(
+          System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"),
+          "whisperlogs/db.sqlite"
+        )
 
-  config :whisperlogs, WhisperLogs.Repo,
-    # ssl: true,
-    url: database_url,
-    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
-    # For machines with several cores, consider starting multiple pools of `pool_size`
-    # pool_count: 4,
-    socket_options: maybe_ipv6
+    config :whisperlogs, WhisperLogs.Repo.SQLite,
+      database: db_path,
+      pool_size: 10,
+      journal_mode: :wal,
+      busy_timeout: 5000,
+      synchronous: :normal,
+      cache_size: -64000,
+      temp_store: :memory
+  end
 
   # The secret key base is used to sign/encrypt cookies and other secrets.
   # A default value is used in config/dev.exs and config/test.exs but you

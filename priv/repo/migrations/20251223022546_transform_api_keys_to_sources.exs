@@ -1,5 +1,6 @@
 defmodule WhisperLogs.Repo.Migrations.TransformApiKeysToSources do
   use Ecto.Migration
+  import WhisperLogs.MigrationHelpers
 
   def change do
     # Add new columns for source types
@@ -7,7 +8,14 @@ defmodule WhisperLogs.Repo.Migrations.TransformApiKeysToSources do
       add :type, :string, null: false, default: "http"
       add :port, :integer
       add :transport, :string
-      add :allowed_hosts, {:array, :string}, default: []
+
+      # PostgreSQL supports native arrays, SQLite uses JSON text
+      if postgres?() do
+        add :allowed_hosts, {:array, :string}, default: []
+      else
+        add :allowed_hosts, :string, default: "[]"
+      end
+
       add :auto_register_hosts, :boolean, default: false
     end
 

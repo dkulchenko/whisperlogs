@@ -97,6 +97,8 @@ defmodule WhisperLogs.AccountsTest do
       assert "should be at most 160 character(s)" in errors_on(changeset).email
     end
 
+    # SQLite unique constraints are case-sensitive, unlike PostgreSQL CITEXT
+    @tag :postgres_only
     test "validates email uniqueness" do
       %{email: email} = user_fixture()
       password = valid_user_password()

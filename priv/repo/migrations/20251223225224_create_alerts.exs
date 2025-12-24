@@ -1,9 +1,16 @@
 defmodule WhisperLogs.Repo.Migrations.CreateAlerts do
   use Ecto.Migration
+  import WhisperLogs.MigrationHelpers
 
   def change do
     create table(:alerts) do
-      add :user_id, references(:users, on_delete: :delete_all), null: false
+      # In SQLite mode (single-user), user_id is not used
+      if postgres?() do
+        add :user_id, references(:users, on_delete: :delete_all), null: false
+      else
+        add :user_id, :integer
+      end
+
       add :name, :string, null: false
       add :description, :string
       add :enabled, :boolean, default: true, null: false
@@ -25,8 +32,11 @@ defmodule WhisperLogs.Repo.Migrations.CreateAlerts do
       timestamps(type: :utc_datetime)
     end
 
-    create index(:alerts, [:user_id])
+    if postgres?() do
+      create index(:alerts, [:user_id])
+      create index(:alerts, [:user_id, :enabled])
+    end
+
     create index(:alerts, [:enabled])
-    create index(:alerts, [:user_id, :enabled])
   end
 end

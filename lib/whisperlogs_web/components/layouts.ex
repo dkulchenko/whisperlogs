@@ -41,9 +41,9 @@ defmodule WhisperLogsWeb.Layouts do
           <div class="flex items-center gap-4">
             <a
               href="/"
-              class="text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight"
+              class="flex items-center gap-1.5 text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight"
             >
-              WhisperLogs
+              <.icon name="hero-chat-bubble-bottom-center-text-solid" class="size-4" /> WhisperLogs
             </a>
 
             <%= if @current_scope do %>
@@ -76,25 +76,28 @@ defmodule WhisperLogsWeb.Layouts do
             <% end %>
           </div>
 
-          <div class="flex items-center gap-3">
-            <%= if @current_scope do %>
-              <span class="text-xs text-text-tertiary">{@current_scope.user.email}</span>
-              <.link
-                href={~p"/users/log-out"}
-                method="delete"
-                class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
-              >
-                Log out
-              </.link>
-            <% else %>
-              <.link
-                navigate={~p"/users/log-in"}
-                class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
-              >
-                Log in
-              </.link>
-            <% end %>
-          </div>
+          <%!-- Hide email/logout in SQLite single-user mode --%>
+          <%= unless WhisperLogs.DbAdapter.sqlite?() do %>
+            <div class="flex items-center gap-3">
+              <%= if @current_scope do %>
+                <span class="text-xs text-text-tertiary">{@current_scope.user.email}</span>
+                <.link
+                  href={~p"/users/log-out"}
+                  method="delete"
+                  class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  Log out
+                </.link>
+              <% else %>
+                <.link
+                  navigate={~p"/users/log-in"}
+                  class="text-xs font-medium text-text-secondary hover:text-text-primary transition-colors"
+                >
+                  Log in
+                </.link>
+              <% end %>
+            </div>
+          <% end %>
         </div>
       </header>
 

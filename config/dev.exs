@@ -1,7 +1,21 @@
 import Config
 
-# Configure your database
-config :whisperlogs, WhisperLogs.Repo,
+# Configure both database repos - runtime.exs decides which one to start
+
+# SQLite config (used when no DATABASE_URL)
+config :whisperlogs, WhisperLogs.Repo.SQLite,
+  database: Path.expand("../priv/dev.db", __DIR__),
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true,
+  pool_size: 10,
+  journal_mode: :wal,
+  busy_timeout: 5000,
+  synchronous: :normal,
+  cache_size: -64000,
+  temp_store: :memory
+
+# PostgreSQL config (used when DATABASE_URL is set)
+config :whisperlogs, WhisperLogs.Repo.Postgres,
   username: "postgres",
   password: "postgres",
   hostname: "127.0.0.1",

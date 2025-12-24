@@ -7,9 +7,21 @@ defmodule WhisperLogs.Application do
 
   @impl true
   def start(_type, _args) do
+    # For SQLite mode, auto-create database and run migrations on startup
+    # This makes it work out of the box without manual setup
+    maybe_auto_migrate()
+
+    # Start the correct repo based on runtime config (set in runtime.exs)
+    repo =
+      if WhisperLogs.DbAdapter.sqlite?() do
+        WhisperLogs.Repo.SQLite
+      else
+        WhisperLogs.Repo.Postgres
+      end
+
     children = [
       WhisperLogsWeb.Telemetry,
-      WhisperLogs.Repo,
+      repo,
       {DNSCluster, query: Application.get_env(:whisperlogs, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
       # ETS cache for source auth (must start before Endpoint)
@@ -36,5 +48,15 @@ defmodule WhisperLogs.Application do
   def config_change(changed, _new, removed) do
     WhisperLogsWeb.Endpoint.config_change(changed, removed)
     :ok
+  end
+
+  # Auto-migrate for SQLite mode only
+  # Disabled in test env via config, PostgreSQL users run migrations manually
+  defp maybe_auto_migrate do
+    auto_migrate? = Application.get_env(:whisperlogs, :auto_migrate, true)
+
+    if auto_migrate? && WhisperLogs.DbAdapter.sqlite?() do
+      WhisperLogs.Release.create_and_migrate()
+    end
   end
 end
