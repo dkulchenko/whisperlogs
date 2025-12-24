@@ -531,8 +531,13 @@ defmodule WhisperLogs.Logs do
 
   defp parse_numeric(value) when is_binary(value) do
     case Decimal.parse(value) do
-      {decimal, ""} -> {:ok, decimal}
-      _ -> :error
+      {decimal, ""} ->
+        # SQLite doesn't support Decimal type, convert to float
+        num = if DbAdapter.sqlite?(), do: Decimal.to_float(decimal), else: decimal
+        {:ok, num}
+
+      _ ->
+        :error
     end
   end
 

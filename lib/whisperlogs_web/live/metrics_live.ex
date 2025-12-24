@@ -63,8 +63,8 @@ defmodule WhisperLogsWeb.MetricsLive do
             />
             <.stat_card
               title="30-Day Projection"
-              value={format_count(@projected_30d_count)}
-              subtitle={"~" <> format_bytes(@projected_30d_bytes)}
+              value={"~" <> format_bytes(@projected_30d_bytes)}
+              subtitle={format_count(@projected_30d_count) <> " logs"}
               icon="hero-chart-bar"
             />
             <.stat_card

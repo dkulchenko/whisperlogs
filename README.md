@@ -6,8 +6,6 @@ A lightweight, self-hosted log aggregation and alerting system. Collect logs fro
 
 ## Quick Start
 
-The easiest way to run WhisperLogs is using the standalone executable:
-
 1. Download the latest release for your platform from the [releases page](https://github.com/dkulchenko/whisperlogs/releases)
 2. Run the executable:
 
@@ -19,35 +17,51 @@ The easiest way to run WhisperLogs is using the standalone executable:
 whisperlogs_windows.exe  # Windows
 ```
 
-3. Open http://localhost:4050 in your browser
-4. Register the first user account
+3. Open http://localhost:4050
 
-That's it! WhisperLogs automatically creates a SQLite database and runs migrations on first start.
+That's it!
 
-## SQLite Mode vs PostgreSQL Mode
+## Features
 
-WhisperLogs supports two database modes, automatically selected at runtime:
+### Live Log Viewer
+- **Real-time streaming** with live tail that follows new logs as they arrive
+- **Infinite scroll** in both directions - scroll up for older logs, down for newer
+- **Expandable log details** showing metadata, timestamps, and copy-to-clipboard actions
+- **Request ID tracking** - click any request ID to filter related logs across your stack
+- **Network delay indicators** - see how long logs took to arrive (color-coded by severity)
 
-| Aspect | SQLite (Default) | PostgreSQL |
-|--------|------------------|------------|
-| **Activation** | No `DATABASE_URL` set | `DATABASE_URL` environment variable set |
-| **Setup** | Zero-config, auto-migrates on startup | Requires manual migration |
-| **Use case** | Development, single-server, personal use | Production, multi-user, high concurrency |
-| **Data location** | `~/.local/share/whisperlogs/db.sqlite` | Remote PostgreSQL server |
+### Powerful Search
+Find exactly what you need with an expressive query syntax:
+- `error` - search message and metadata
+- `user_id:123` - filter by metadata field
+- `duration_ms:>500` - numeric comparisons
+- `"connection refused"` - exact phrases
+- `-debug` - exclude terms
+- `level:error timestamp:>-1h` - combine multiple filters
 
-### Using PostgreSQL Mode
+Real-time syntax highlighting shows you exactly how your query is interpreted.
 
-```bash
-export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
-export SECRET_KEY_BASE="$(openssl rand -base64 48)"
-./whisperlogs_linux
-```
+### Smart Alerting
+- **Pattern alerts** - trigger immediately when a log matches your search
+- **Velocity alerts** - trigger when matches exceed a threshold (e.g., "more than 100 errors in 5 minutes")
+- **Live preview** - see how many logs match before saving
+- **Cooldown periods** - prevent alert fatigue
 
-For PostgreSQL, run migrations before first use:
+### Notifications
+Route alerts to the channels you already use:
+- **Email** - simple SMTP delivery
+- **Pushover** - mobile push notifications with priority levels
 
-```bash
-./whisperlogs_linux eval "WhisperLogs.Release.migrate()"
-```
+### Metrics Dashboard
+- Total log volume and storage usage
+- Hourly, daily, and monthly breakdowns with interactive charts
+- 30-day projections based on current velocity
+
+### Flexible Ingestion
+Collect logs from anywhere:
+- **HTTP API** - POST JSON from any language
+- **Syslog** - RFC 3164 and RFC 5424 support (UDP/TCP)
+- **Elixir Shipper** - zero-config Logger integration
 
 ## Sending Logs
 
@@ -154,28 +168,33 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 - Auto-registration of new hosts (optional)
 - Automatic severity-to-level mapping
 
-## Configuration
+## Production Deployment
+
+By default, WhisperLogs uses SQLite which requires no configuration. For production deployments with multiple users or high concurrency, you can use PostgreSQL instead.
+
+### Using PostgreSQL
+
+Set the `DATABASE_URL` environment variable to switch to PostgreSQL mode:
+
+```bash
+export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
+export SECRET_KEY_BASE="$(openssl rand -base64 48)"
+./whisperlogs_linux eval "WhisperLogs.Release.migrate()"
+./whisperlogs_linux
+```
+
+Then open the browser and register the first user account.
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `DATABASE_URL` | - | PostgreSQL connection URL. If set, uses PostgreSQL mode |
+| `DATABASE_URL` | - | PostgreSQL connection URL (enables PostgreSQL mode) |
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
-| `SECRET_KEY_BASE` | - | Required for session encryption in production |
+| `SECRET_KEY_BASE` | - | Required for PostgreSQL mode |
 | `PHX_HOST` | `localhost` | Server hostname |
 | `PORT` | `4050` | Web server port |
 | `POOL_SIZE` | `10` | Database connection pool size |
-
-## Features
-
-- **Real-time log viewing** - Live tail with instant updates as logs arrive
-- **Advanced search** - Query by text, metadata fields, log levels, and time ranges
-- **Alerting system** - Trigger alerts on log patterns with velocity thresholds
-- **Notification channels** - Route alerts to email, webhooks, and more
-- **Metrics dashboard** - Track log volume, storage usage, and trends
-- **Multi-source support** - Aggregate logs from multiple applications
-- **Retention management** - Automatic log cleanup based on age
 
 ## Development
 
@@ -183,7 +202,7 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 
 - Elixir 1.15+
 - Node.js 18+
-- PostgreSQL 15+ (optional, for PostgreSQL mode)
+- PostgreSQL 15+ (optional)
 
 ### Setup
 
@@ -191,14 +210,7 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 git clone https://github.com/dkulchenko/whisperlogs.git
 cd whisperlogs
 mix setup
-```
-
-### Running the Server
-
-```bash
 mix phx.server
-# Or with IEx console:
-iex -S mix phx.server
 ```
 
 Open http://localhost:4050
@@ -211,18 +223,11 @@ mix test
 
 ### Building Standalone Executables
 
-Build executables for all platforms using Burrito:
-
 ```bash
 MIX_ENV=prod mix release
 ```
 
-Executables are output to `burrito_out/`:
-- `whisperlogs_linux` - Linux x86_64
-- `whisperlogs_linux_arm` - Linux ARM64
-- `whisperlogs_macos` - macOS Intel
-- `whisperlogs_macos_arm` - macOS Apple Silicon
-- `whisperlogs_windows.exe` - Windows x86_64
+Executables are output to `burrito_out/`.
 
 ## License
 
