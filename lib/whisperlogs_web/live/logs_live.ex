@@ -7,6 +7,8 @@ defmodule WhisperLogsWeb.LogsLive do
 
   @per_page 100
   @max_logs @per_page * 5
+  @flush_interval_ms 150
+  @max_buffer_size 200
 
   @impl true
   def mount(_params, _session, socket) do
@@ -38,6 +40,8 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:loading_newer?, false)
      |> assign(:scroll_to_date, "")
      |> assign(:scroll_to_time, "")
+     |> assign(:log_buffer, [])
+     |> assign(:flush_timer_ref, if(connected?(socket), do: schedule_flush(), else: nil))
      |> stream(:logs, logs)}
   end
 
@@ -47,6 +51,33 @@ defmodule WhisperLogsWeb.LogsLive do
     first = List.first(logs)
     last = List.last(logs)
     {{first.timestamp, first.id}, {last.timestamp, last.id}}
+  end
+
+  defp schedule_flush do
+    Process.send_after(self(), :flush_log_buffer, @flush_interval_ms)
+  end
+
+  defp flush_buffer(%{assigns: %{log_buffer: []}} = socket), do: socket
+
+  defp flush_buffer(socket) do
+    buffer = socket.assigns.log_buffer
+    at_bottom? = socket.assigns.at_bottom?
+
+    logs_to_insert = Enum.reverse(buffer)
+
+    if at_bottom? do
+      newest_log = List.last(logs_to_insert)
+      new_cursor_bottom = {newest_log.timestamp, newest_log.id}
+
+      socket
+      |> assign(:log_buffer, [])
+      |> assign(:cursor_bottom, new_cursor_bottom)
+      |> stream(:logs, logs_to_insert, at: -1, limit: -@max_logs)
+    else
+      socket
+      |> assign(:log_buffer, [])
+      |> assign(:has_newer?, true)
+    end
   end
 
   defp filter_opts(filters) do
@@ -868,11 +899,27 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
+     |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)}
   end
 
   def handle_event("toggle_live_tail", _params, socket) do
-    {:noreply, assign(socket, :live_tail, !socket.assigns.live_tail)}
+    new_live_tail = !socket.assigns.live_tail
+
+    socket =
+      if new_live_tail do
+        assign(socket, :flush_timer_ref, schedule_flush())
+      else
+        if socket.assigns.flush_timer_ref do
+          Process.cancel_timer(socket.assigns.flush_timer_ref)
+        end
+
+        socket
+        |> assign(:flush_timer_ref, nil)
+        |> assign(:log_buffer, [])
+      end
+
+    {:noreply, assign(socket, :live_tail, new_live_tail)}
   end
 
   def handle_event("update-scroll-to", params, socket) do
@@ -910,6 +957,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
+     |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)}
   end
 
@@ -1012,11 +1060,21 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
+     |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)
      |> push_event("force-scroll-bottom", %{})}
   end
 
   def handle_event("scroll-away", _params, socket) do
+    socket =
+      if socket.assigns.log_buffer != [] do
+        socket
+        |> assign(:log_buffer, [])
+        |> assign(:has_newer?, true)
+      else
+        socket
+      end
+
     {:noreply, assign(socket, :at_bottom?, false)}
   end
 
@@ -1072,6 +1130,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:has_older?, has_older?)
      |> assign(:has_newer?, has_newer?)
      |> assign(:at_bottom?, false)
+     |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)
      |> push_event("scroll-to-log", %{log_id: id})}
   end
@@ -1079,7 +1138,8 @@ defmodule WhisperLogsWeb.LogsLive do
   @impl true
   def handle_info({:new_log, log}, socket) do
     if socket.assigns.live_tail and log_matches_filters?(log, socket.assigns.filters) do
-      # Also refresh sources if this is a new source
+      buffer = [log | socket.assigns.log_buffer]
+
       sources =
         if log.source in socket.assigns.sources do
           socket.assigns.sources
@@ -1087,24 +1147,33 @@ defmodule WhisperLogsWeb.LogsLive do
           [log.source | socket.assigns.sources] |> Enum.sort()
         end
 
-      # Only insert if user is at bottom, otherwise just mark that newer logs exist
-      if socket.assigns.at_bottom? do
-        new_cursor_bottom = {log.timestamp, log.id}
+      socket =
+        socket
+        |> assign(:sources, sources)
+        |> assign(:log_buffer, buffer)
 
-        {:noreply,
-         socket
-         |> assign(:sources, sources)
-         |> assign(:cursor_bottom, new_cursor_bottom)
-         |> stream_insert(:logs, log, at: -1, limit: -@max_logs)}
+      # Force flush if buffer too large (back-pressure)
+      if length(buffer) >= @max_buffer_size do
+        {:noreply, flush_buffer(socket)}
       else
-        {:noreply,
-         socket
-         |> assign(:sources, sources)
-         |> assign(:has_newer?, true)}
+        {:noreply, socket}
       end
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info(:flush_log_buffer, socket) do
+    socket =
+      if socket.assigns.live_tail do
+        socket
+        |> assign(:flush_timer_ref, schedule_flush())
+        |> flush_buffer()
+      else
+        assign(socket, :flush_timer_ref, nil)
+      end
+
+    {:noreply, socket}
   end
 
   defp do_scroll_to_time(socket, date, time) do

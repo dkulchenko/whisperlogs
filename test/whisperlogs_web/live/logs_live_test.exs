@@ -208,11 +208,11 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     test "receives new logs via PubSub when live tail is on", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
 
-      # Create a new log - this should trigger PubSub
+      # Create a new log - this should trigger PubSub broadcast
       _new_log = log_fixture("test-source", message: "New real-time log")
 
-      # Give time for PubSub to deliver
-      Process.sleep(50)
+      # Force flush of the log buffer (logs are batched for performance)
+      send(lv.pid, :flush_log_buffer)
 
       # Re-render to see update
       html = render(lv)
