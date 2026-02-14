@@ -172,6 +172,42 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 
 By default, WhisperLogs uses SQLite which requires no configuration. For production deployments with multiple users or high concurrency, you can use PostgreSQL instead.
 
+### Docker (SQLite with Durable Storage by Default)
+
+Build the image:
+
+```bash
+docker build -t whisperlogs:latest .
+```
+
+Run with a persistent Docker volume:
+
+```bash
+docker run -d \
+  --name whisperlogs \
+  -p 4050:4050 \
+  -v whisperlogs_data:/var/lib/whisperlogs \
+  whisperlogs:latest
+```
+
+SQLite data is stored at `/var/lib/whisperlogs/db.sqlite` in the container, so mounting `/var/lib/whisperlogs` keeps logs and state across restarts.
+
+You can also use Docker Compose:
+
+```bash
+docker compose up -d --build
+```
+
+The included `docker-compose.yml` uses SQLite by default with durable storage and exposes the web UI on port `4050`.
+
+If you configure Syslog sources, publish those ports too (for example `5514/tcp` or `5514/udp`).
+
+### Docker + PostgreSQL
+
+Set `DATABASE_URL` to switch to PostgreSQL mode. In Docker, pending migrations are run automatically at container startup before the app boots.
+
+Set `SECRET_KEY_BASE` in container deployments to keep sessions stable across restarts (required in PostgreSQL mode, recommended in SQLite mode).
+
 ### Using PostgreSQL
 
 Set the `DATABASE_URL` environment variable to switch to PostgreSQL mode:
@@ -191,7 +227,7 @@ Then open the browser and register the first user account.
 |----------|---------|-------------|
 | `DATABASE_URL` | - | PostgreSQL connection URL (enables PostgreSQL mode) |
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
-| `SECRET_KEY_BASE` | - | Required for PostgreSQL mode |
+| `SECRET_KEY_BASE` | - | Required for PostgreSQL mode, recommended for stable sessions in containerized SQLite deployments |
 | `PHX_HOST` | `localhost` | Server hostname |
 | `PORT` | `4050` | Web server port |
 | `POOL_SIZE` | `10` | Database connection pool size |

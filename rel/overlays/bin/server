@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+
+if [ -n "${DATABASE_URL:-}" ]; then
+  ./whisperlogs eval "WhisperLogs.Release.migrate()"
+fi
+
+PHX_SERVER=true exec ./whisperlogs start

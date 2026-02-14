@@ -5,19 +5,15 @@ defmodule WhisperLogs.Release do
   For SQLite mode, this is called automatically on startup to ensure
   the database exists and migrations are run.
 
-  For PostgreSQL mode, users should run migrations manually:
+  For PostgreSQL mode, users can run migrations manually:
 
       ./whisperlogs eval "WhisperLogs.Release.migrate()"
-
-  Or in development:
-
-      mix ecto.migrate
   """
 
   import Ecto.Query
 
-  alias WhisperLogs.Repo
   alias WhisperLogs.Accounts.User
+  alias WhisperLogs.Repo
 
   @app :whisperlogs
 
@@ -102,6 +98,8 @@ defmodule WhisperLogs.Release do
   end
 
   defp load_app do
+    # Some platforms require SSL when connecting to databases.
+    Application.ensure_all_started(:ssl)
     Application.load(@app)
   end
 end

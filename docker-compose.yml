@@ -1,0 +1,23 @@
+services:
+  whisperlogs:
+    build:
+      context: .
+    image: whisperlogs:latest
+    ports:
+      - "4050:4050"
+      # Expose syslog listeners as needed for configured sources:
+      # - "5514:5514/tcp"
+      # - "5514:5514/udp"
+    environment:
+      PORT: "4050"
+      DATABASE_PATH: /var/lib/whisperlogs/db.sqlite
+      # Recommended for stable sessions across restarts:
+      # SECRET_KEY_BASE: replace-with-strong-random-value
+      # Set to use PostgreSQL mode instead of SQLite:
+      # DATABASE_URL: postgres://user:password@postgres:5432/whisperlogs
+    volumes:
+      - whisperlogs_data:/var/lib/whisperlogs
+    restart: unless-stopped
+
+volumes:
+  whisperlogs_data:
