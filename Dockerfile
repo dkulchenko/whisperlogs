@@ -22,7 +22,7 @@ FROM ${BUILDER_IMAGE} AS builder
 
 # install build dependencies
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential git \
+  && apt-get install -y --no-install-recommends build-essential git nodejs npm \
   && rm -rf /var/lib/apt/lists/*
 
 # prepare build dir
@@ -39,6 +39,10 @@ ENV MIX_ENV="prod"
 COPY mix.exs mix.lock ./
 RUN mix deps.get --only $MIX_ENV
 RUN mkdir config
+
+# install Node.js dependencies for asset bundling (echarts, etc.)
+COPY assets/package.json assets/package-lock.json ./assets/
+RUN npm ci --prefix assets
 
 # copy compile-time config files before we compile dependencies
 # to ensure any relevant config change will trigger the dependencies
@@ -64,7 +68,7 @@ RUN mix assets.deploy
 COPY config/runtime.exs config/
 
 COPY rel rel
-RUN mix release
+RUN WHISPERLOGS_SKIP_BURRITO=1 mix release whisperlogs
 
 # start a new build stage so that the final image will only contain
 # the compiled release and other runtime necessities

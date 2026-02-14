@@ -265,6 +265,15 @@ MIX_ENV=prod mix release
 
 Executables are output to `burrito_out/`.
 
+### Release Automation
+
+GitHub release publishing automatically triggers:
+
+- `.github/workflows/docker-release.yml` to build and push multi-arch Docker images to GHCR
+- `.github/workflows/burrito-release.yml` to run `MIX_ENV=prod mix release whisperlogs` and upload `burrito_out/*` binaries to the same GitHub release
+
+Both workflows build from the exact release tag (`vX.Y.Z`) so Docker images and Burrito binaries match the tagged source.
+
 ## License
 
 MIT

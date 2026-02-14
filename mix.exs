@@ -4,7 +4,7 @@ defmodule WhisperLogs.MixProject do
   def project do
     [
       app: :whisperlogs,
-      version: "0.2.0",
+      version: "0.2.2",
       elixir: "~> 1.15",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -33,9 +33,16 @@ defmodule WhisperLogs.MixProject do
   end
 
   defp releases do
+    steps =
+      if System.get_env("WHISPERLOGS_SKIP_BURRITO") in ["1", "true"] do
+        [:assemble]
+      else
+        [:assemble, &Burrito.wrap/1]
+      end
+
     [
       whisperlogs: [
-        steps: [:assemble, &Burrito.wrap/1],
+        steps: steps,
         burrito: [
           targets: [
             linux: [os: :linux, cpu: :x86_64],
