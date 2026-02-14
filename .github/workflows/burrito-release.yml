@@ -20,26 +20,26 @@ jobs:
 
     steps:
       - name: Checkout release ref
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6.0.2
         with:
           ref: ${{ github.event.release.tag_name }}
 
       - name: Set up BEAM
-        uses: erlef/setup-beam@v1
+        uses: erlef/setup-beam@v1.20.4
         with:
           version-type: strict
-          otp-version: "27.2"
-          elixir-version: "1.17.3"
+          otp-version: "28.3.1"
+          elixir-version: "1.19.5"
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6.2.0
         with:
-          node-version: "20"
+          node-version: "25.6.1"
           cache: npm
           cache-dependency-path: assets/package-lock.json
 
       - name: Set up Zig
-        uses: mlugg/setup-zig@v2
+        uses: mlugg/setup-zig@v2.2.1
         with:
           version: "0.15.2"
 
