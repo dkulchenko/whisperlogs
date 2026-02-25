@@ -111,6 +111,37 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       assert length(history) == 1
     end
 
+    test "suppresses logs during cooldown window instead of queuing them" do
+      user = user_fixture()
+      alert = any_match_alert_fixture(user, search_query: "level:error", cooldown_seconds: 3600)
+
+      # Create a matching log and trigger
+      _log1 = log_fixture("test-source", level: "error", message: "First error")
+
+      trigger_evaluation()
+
+      updated_alert = Alerts.get_alert(user, alert.id)
+      assert updated_alert.last_triggered_at != nil
+      first_trigger = updated_alert.last_triggered_at
+
+      # Create more matching logs during cooldown
+      _log2 = log_fixture("test-source", level: "error", message: "Second error")
+      log3 = log_fixture("test-source", level: "error", message: "Third error")
+
+      trigger_evaluation()
+
+      # Should NOT trigger again (still in cooldown)
+      updated_alert = Alerts.get_alert(user, alert.id)
+      assert updated_alert.last_triggered_at == first_trigger
+
+      # But last_seen_log_id should have advanced to the latest matching log
+      assert updated_alert.last_seen_log_id == log3.id
+
+      # Still only one history entry (logs during cooldown were suppressed)
+      history = Alerts.list_alert_history(updated_alert)
+      assert length(history) == 1
+    end
+
     test "does not evaluate disabled alerts" do
       user = user_fixture()
       alert = any_match_alert_fixture(user, search_query: "level:error", enabled: false)

@@ -63,7 +63,7 @@ defmodule WhisperLogs.Alerts.Evaluator do
 
   defp evaluate_alert(%Alert{alert_type: "any_match"} = alert) do
     if in_cooldown?(alert) do
-      :skip
+      advance_last_seen_log_id(alert)
     else
       evaluate_any_match(alert)
     end
@@ -134,6 +134,39 @@ defmodule WhisperLogs.Alerts.Evaluator do
         base_query =
           Log
           |> order_by([l], asc: l.id)
+          |> limit(1)
+
+        query_with_filter =
+          if last_id do
+            where(base_query, [l], l.id > ^last_id)
+          else
+            base_query
+          end
+
+        query_with_filter
+        |> Logs.apply_search_tokens(tokens)
+        |> Repo.one()
+    end
+  end
+
+  # During cooldown, advance last_seen_log_id so logs arriving in the
+  # cooldown window are silently skipped rather than queued for individual alerts.
+  defp advance_last_seen_log_id(%Alert{search_query: query, last_seen_log_id: last_id} = alert) do
+    case find_latest_matching_log(query, last_id) do
+      nil -> :skip
+      log -> Alerts.update_alert_state(alert, %{last_seen_log_id: log.id})
+    end
+  end
+
+  defp find_latest_matching_log(search_query, last_id) do
+    case SearchParser.parse(search_query) do
+      {:ok, []} ->
+        nil
+
+      {:ok, tokens} ->
+        base_query =
+          Log
+          |> order_by([l], desc: l.id)
           |> limit(1)
 
         query_with_filter =
