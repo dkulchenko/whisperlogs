@@ -17,24 +17,18 @@ defmodule WhisperLogsWeb.LogsLive do
     end
 
     sources = Logs.list_sources()
-    filters = default_filters()
-    opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
-    logs = Logs.list_logs(opts) |> Enum.reverse()
-
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
 
     {:ok,
      socket
      |> assign(:page_title, "Logs")
      |> assign(:sources, sources)
-     |> assign(:filters, filters)
+     |> assign(:filters, default_filters())
      |> assign(:live_tail, true)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
+     |> assign(:cursor_top, nil)
+     |> assign(:cursor_bottom, nil)
+     |> assign(:has_older?, false)
      |> assign(:has_newer?, false)
      |> assign(:loading_older?, false)
      |> assign(:loading_newer?, false)
@@ -42,7 +36,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:scroll_to_time, "")
      |> assign(:log_buffer, [])
      |> assign(:flush_timer_ref, if(connected?(socket), do: schedule_flush(), else: nil))
-     |> stream(:logs, logs)}
+     |> stream(:logs, [])}
   end
 
   defp extract_cursors([]), do: {nil, nil}
@@ -877,15 +871,8 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   @impl true
-  def handle_event("filter", params, socket) do
-    # Form sends all fields at once
-    filters = %{
-      search: params["search"] || "",
-      source: params["source"] || "",
-      levels: params["levels"] || [],
-      time_range: params["time_range"] || socket.assigns.filters.time_range
-    }
-
+  def handle_params(params, _uri, socket) do
+    filters = params_to_filters(params)
     logs = fetch_logs(filters)
     {cursor_top, cursor_bottom} = extract_cursors(logs)
     has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
@@ -901,6 +888,18 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:far_from_bottom?, false)
      |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)}
+  end
+
+  @impl true
+  def handle_event("filter", params, socket) do
+    filters = %{
+      search: params["search"] || "",
+      source: params["source"] || "",
+      levels: params["levels"] || [],
+      time_range: params["time_range"] || socket.assigns.filters.time_range
+    }
+
+    {:noreply, push_patch(socket, to: ~p"/?#{filters_to_params(filters)}")}
   end
 
   def handle_event("toggle_live_tail", _params, socket) do
@@ -943,22 +942,7 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   def handle_event("clear_filters", _params, socket) do
-    filters = default_filters()
-    logs = fetch_logs(filters)
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
-
-    {:noreply,
-     socket
-     |> assign(:filters, filters)
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
-     |> assign(:has_newer?, false)
-     |> assign(:at_bottom?, true)
-     |> assign(:far_from_bottom?, false)
-     |> assign(:log_buffer, [])
-     |> stream(:logs, logs, reset: true)}
+    {:noreply, push_patch(socket, to: ~p"/")}
   end
 
   def handle_event("load-older", _params, socket) do
@@ -1092,21 +1076,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("filter-by-request-id", %{"request_id" => request_id}, socket) do
     filters = %{socket.assigns.filters | search: "request_id:#{request_id}"}
-
-    logs = fetch_logs(filters)
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
-
-    {:noreply,
-     socket
-     |> assign(:filters, filters)
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
-     |> assign(:has_newer?, false)
-     |> assign(:at_bottom?, true)
-     |> assign(:far_from_bottom?, false)
-     |> stream(:logs, logs, reset: true)}
+    {:noreply, push_patch(socket, to: ~p"/?#{filters_to_params(filters)}")}
   end
 
   def handle_event("view-in-context", %{"id" => id, "timestamp" => timestamp_str}, socket) do
@@ -1229,6 +1199,48 @@ defmodule WhisperLogsWeb.LogsLive do
       levels: ~w(debug info warning error),
       time_range: "3h"
     }
+  end
+
+  defp params_to_filters(params) do
+    defaults = default_filters()
+
+    levels =
+      case params["levels"] do
+        nil -> defaults.levels
+        "" -> []
+        levels_str -> String.split(levels_str, ",")
+      end
+
+    %{
+      search: params["q"] || defaults.search,
+      source: params["source"] || defaults.source,
+      levels: levels,
+      time_range: params["t"] || defaults.time_range
+    }
+  end
+
+  defp filters_to_params(filters) do
+    defaults = default_filters()
+    params = %{}
+
+    params =
+      if filters.search != defaults.search,
+        do: Map.put(params, "q", filters.search),
+        else: params
+
+    params =
+      if filters.time_range != defaults.time_range,
+        do: Map.put(params, "t", filters.time_range),
+        else: params
+
+    params =
+      if filters.source != defaults.source,
+        do: Map.put(params, "source", filters.source),
+        else: params
+
+    if Enum.sort(filters.levels) != Enum.sort(defaults.levels),
+      do: Map.put(params, "levels", Enum.join(filters.levels, ",")),
+      else: params
   end
 
   defp filters_active?(filters) do
