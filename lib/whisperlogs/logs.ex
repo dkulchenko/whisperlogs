@@ -7,7 +7,9 @@ defmodule WhisperLogs.Logs do
 
   alias WhisperLogs.DbAdapter
   alias WhisperLogs.Repo
+  alias WhisperLogs.Accounts.User
   alias WhisperLogs.Logs.Log
+  alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
 
   @pubsub WhisperLogs.PubSub
@@ -548,4 +550,52 @@ defmodule WhisperLogs.Logs do
   end
 
   defp parse_numeric(_), do: :error
+
+  # === Saved Searches ===
+
+  def list_saved_searches(%User{id: user_id}) do
+    SavedSearch
+    |> where([s], s.user_id == ^user_id)
+    |> order_by([s], asc: s.name)
+    |> Repo.all()
+    |> Enum.map(&deserialize_levels/1)
+  end
+
+  def get_saved_search(%User{id: user_id}, id) do
+    SavedSearch
+    |> where([s], s.user_id == ^user_id and s.id == ^id)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      saved_search -> deserialize_levels(saved_search)
+    end
+  end
+
+  def create_saved_search(%User{id: user_id}, attrs) do
+    attrs = serialize_levels(attrs)
+
+    %SavedSearch{user_id: user_id}
+    |> SavedSearch.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def delete_saved_search(%SavedSearch{} = saved_search) do
+    Repo.delete(saved_search)
+  end
+
+  defp serialize_levels(%{levels: levels} = attrs) when is_list(levels) do
+    Map.put(attrs, :levels, Enum.join(levels, ","))
+  end
+
+  defp serialize_levels(%{"levels" => levels} = attrs) when is_list(levels) do
+    Map.put(attrs, "levels", Enum.join(levels, ","))
+  end
+
+  defp serialize_levels(attrs), do: attrs
+
+  defp deserialize_levels(%SavedSearch{levels: levels} = saved_search) when is_binary(levels) do
+    %{saved_search | levels: String.split(levels, ",", trim: true)}
+  end
+
+  defp deserialize_levels(saved_search), do: saved_search
 end

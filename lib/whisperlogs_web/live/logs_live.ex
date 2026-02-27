@@ -18,11 +18,20 @@ defmodule WhisperLogsWeb.LogsLive do
 
     sources = Logs.list_sources()
 
+    saved_searches =
+      if socket.assigns[:current_scope] && socket.assigns.current_scope.user do
+        Logs.list_saved_searches(socket.assigns.current_scope.user)
+      else
+        []
+      end
+
     {:ok,
      socket
      |> assign(:page_title, "Logs")
      |> assign(:sources, sources)
      |> assign(:filters, default_filters())
+     |> assign(:saved_searches, saved_searches)
+     |> assign(:show_save_form, false)
      |> assign(:live_tail, true)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
@@ -602,6 +611,116 @@ defmodule WhisperLogsWeb.LogsLive do
             >
               Clear
             </button>
+
+            <%!-- Saved Searches --%>
+            <div class="relative">
+              <button
+                type="button"
+                phx-click={JS.toggle(to: "#saved-searches-popover")}
+                class={[
+                  "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border",
+                  "bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
+                ]}
+                title="Saved searches"
+              >
+                <.icon name="hero-bookmark" class="size-3.5" />
+                <span :if={@saved_searches != []} class="text-xs text-text-tertiary">
+                  {length(@saved_searches)}
+                </span>
+              </button>
+
+              <div
+                id="saved-searches-popover"
+                class="hidden absolute bottom-full right-0 mb-2 w-72 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50"
+                phx-click-away={JS.hide(to: "#saved-searches-popover")}
+              >
+                <div class="p-3">
+                  <div class="flex items-center justify-between mb-2">
+                    <h3 class="text-sm font-semibold text-text-primary">Saved Searches</h3>
+                    <button
+                      type="button"
+                      phx-click={JS.hide(to: "#saved-searches-popover")}
+                      class="p-1 rounded hover:bg-bg-muted transition-colors"
+                    >
+                      <.icon name="hero-x-mark" class="size-4 text-text-tertiary" />
+                    </button>
+                  </div>
+
+                  <%= if @saved_searches == [] do %>
+                    <p class="text-xs text-text-tertiary py-3 text-center">
+                      No saved searches yet
+                    </p>
+                  <% else %>
+                    <div class="space-y-1 max-h-48 overflow-y-auto">
+                      <div
+                        :for={saved <- @saved_searches}
+                        class="group flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-bg-surface transition-colors"
+                      >
+                        <button
+                          type="button"
+                          phx-click={
+                            JS.push("load-saved-search", value: %{id: saved.id})
+                            |> JS.hide(to: "#saved-searches-popover")
+                          }
+                          class="flex-1 text-left text-sm text-text-primary truncate"
+                          title={saved_search_summary(saved)}
+                        >
+                          {saved.name}
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="delete-saved-search"
+                          phx-value-id={saved.id}
+                          data-confirm="Delete this saved search?"
+                          class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-red-500/10 transition-all"
+                        >
+                          <.icon
+                            name="hero-trash"
+                            class="size-3.5 text-text-tertiary hover:text-red-400"
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  <% end %>
+
+                  <div class="mt-2 pt-2 border-t border-border-subtle">
+                    <%= if @show_save_form do %>
+                      <form phx-submit="save-search" class="flex items-center gap-2">
+                        <input
+                          type="text"
+                          name="name"
+                          placeholder="Search name..."
+                          class="flex-1 bg-bg-surface border border-border-default rounded-lg px-2 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary placeholder:text-text-tertiary"
+                          autofocus
+                          required
+                        />
+                        <button
+                          type="submit"
+                          class="px-2 py-1.5 bg-purple-500/10 text-purple-400 rounded-lg text-smaller font-medium hover:bg-purple-500/20 transition-colors border border-purple-500/30"
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          phx-click="toggle-save-form"
+                          class="p-1.5 rounded hover:bg-bg-muted transition-colors"
+                        >
+                          <.icon name="hero-x-mark" class="size-3.5 text-text-tertiary" />
+                        </button>
+                      </form>
+                    <% else %>
+                      <button
+                        type="button"
+                        phx-click="toggle-save-form"
+                        class="w-full flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-lg text-smaller font-medium text-purple-400 hover:bg-purple-500/10 transition-colors"
+                      >
+                        <.icon name="hero-plus" class="size-3.5" /> Save current filters
+                      </button>
+                    <% end %>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </form>
       </div>
@@ -948,6 +1067,72 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("clear_filters", _params, socket) do
     {:noreply, push_patch(socket, to: ~p"/")}
+  end
+
+  def handle_event("save-search", %{"name" => name}, socket) do
+    filters = socket.assigns.filters
+    user = socket.assigns.current_scope.user
+
+    attrs = %{
+      name: String.trim(name),
+      search: filters.search,
+      source: filters.source,
+      levels: filters.levels,
+      time_range: filters.time_range
+    }
+
+    case Logs.create_saved_search(user, attrs) do
+      {:ok, _saved_search} ->
+        saved_searches = Logs.list_saved_searches(user)
+
+        {:noreply,
+         socket
+         |> assign(:saved_searches, saved_searches)
+         |> assign(:show_save_form, false)
+         |> put_flash(:info, "Search saved")}
+
+      {:error, _changeset} ->
+        {:noreply, put_flash(socket, :error, "Could not save search. Name may already be taken.")}
+    end
+  end
+
+  def handle_event("load-saved-search", %{"id" => id}, socket) do
+    case Logs.get_saved_search(socket.assigns.current_scope.user, id) do
+      nil ->
+        {:noreply, put_flash(socket, :error, "Saved search not found")}
+
+      saved_search ->
+        filters = %{
+          search: saved_search.search,
+          source: saved_search.source,
+          levels: saved_search.levels,
+          time_range: saved_search.time_range
+        }
+
+        {:noreply, push_patch(socket, to: ~p"/?#{filters_to_params(filters)}")}
+    end
+  end
+
+  def handle_event("delete-saved-search", %{"id" => id}, socket) do
+    user = socket.assigns.current_scope.user
+
+    case Logs.get_saved_search(user, id) do
+      nil ->
+        {:noreply, socket}
+
+      saved_search ->
+        {:ok, _} = Logs.delete_saved_search(saved_search)
+        saved_searches = Logs.list_saved_searches(user)
+
+        {:noreply,
+         socket
+         |> assign(:saved_searches, saved_searches)
+         |> put_flash(:info, "Saved search deleted")}
+    end
+  end
+
+  def handle_event("toggle-save-form", _params, socket) do
+    {:noreply, assign(socket, :show_save_form, !socket.assigns.show_save_form)}
   end
 
   def handle_event("load-older", _params, socket) do
@@ -1382,6 +1567,20 @@ defmodule WhisperLogsWeb.LogsLive do
       end
     else
       _ -> false
+    end
+  end
+
+  defp saved_search_summary(saved) do
+    parts = []
+    parts = if saved.search != "", do: ["q: #{saved.search}" | parts], else: parts
+    parts = if saved.source != "", do: ["source: #{saved.source}" | parts], else: parts
+    parts = if saved.time_range != "3h", do: ["time: #{saved.time_range}" | parts], else: parts
+
+    if Enum.sort(saved.levels) != Enum.sort(~w(debug info warning error)) do
+      parts = ["levels: #{Enum.join(saved.levels, ", ")}" | parts]
+      Enum.reverse(parts) |> Enum.join(" | ")
+    else
+      Enum.reverse(parts) |> Enum.join(" | ")
     end
   end
 
