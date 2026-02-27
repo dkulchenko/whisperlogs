@@ -164,6 +164,28 @@ defmodule WhisperLogs.Logs.SearchParserTest do
     end
   end
 
+  describe "negated phrase parsing" do
+    test "parses negated phrase" do
+      assert {:ok, [{:exclude_phrase, "easypost message"}]} =
+               SearchParser.parse("-\"easypost message\"")
+    end
+
+    test "parses negated single-word phrase" do
+      assert {:ok, [{:exclude_phrase, "error"}]} = SearchParser.parse("-\"error\"")
+    end
+
+    test "ignores empty negated phrase" do
+      assert {:ok, []} = SearchParser.parse("-\"\"")
+    end
+
+    test "combines with other tokens" do
+      {:ok, tokens} = SearchParser.parse("level:warn -\"easypost message\"")
+      assert length(tokens) == 2
+      assert Enum.any?(tokens, fn t -> match?({:level_filter, "warning"}, t) end)
+      assert Enum.any?(tokens, fn t -> match?({:exclude_phrase, "easypost message"}, t) end)
+    end
+  end
+
   describe "combined queries" do
     test "parses multiple pseudo-metadata filters" do
       {:ok, tokens} = SearchParser.parse("level:error timestamp:>-1h source:prod")

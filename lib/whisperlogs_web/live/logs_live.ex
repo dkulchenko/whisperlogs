@@ -722,6 +722,7 @@ defmodule WhisperLogsWeb.LogsLive do
       const TOKEN_PATTERNS = [
         { type: 'exclude_metadata_quoted', regex: /-[\w.-]+:"[^"]*"/ },
         { type: 'metadata_quoted', regex: /[\w.-]+:"[^"]*"/ },
+        { type: 'exclude_phrase', regex: /-"[^"]*"/ },
         { type: 'phrase', regex: /"[^"]*"/ },
         { type: 'exclude_metadata_op', regex: /-[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
         { type: 'metadata_op', regex: /[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
@@ -742,6 +743,10 @@ defmodule WhisperLogsWeb.LogsLive do
         const escaped = token.replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
         switch (type) {
+          case 'exclude_phrase':
+            const epPhrase = token.slice(1) // remove leading -
+            return `<span class="text-red-400">-</span><span class="text-amber-400">${epPhrase.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
+
           case 'phrase':
             return `<span class="text-amber-400">${escaped}</span>`
 
@@ -1282,6 +1287,10 @@ defmodule WhisperLogsWeb.LogsLive do
 
   defp log_matches_token?(log, {:phrase, phrase}) do
     log_matches_token?(log, {:term, phrase})
+  end
+
+  defp log_matches_token?(log, {:exclude_phrase, phrase}) do
+    not log_matches_token?(log, {:term, phrase})
   end
 
   defp log_matches_token?(log, {:exclude, term}) do

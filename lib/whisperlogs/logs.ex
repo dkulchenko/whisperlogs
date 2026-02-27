@@ -264,6 +264,12 @@ defmodule WhisperLogs.Logs do
     where(query, ^DbAdapter.text_search(pattern))
   end
 
+  # Exclude quoted phrase: NOT in message AND NOT in metadata (preserves spaces)
+  defp apply_search_token({:exclude_phrase, phrase}, query) do
+    pattern = SearchParser.escape_like(phrase)
+    where(query, ^DbAdapter.text_exclude(pattern))
+  end
+
   # Exclude term: NOT in message AND NOT in metadata
   defp apply_search_token({:exclude, term}, query) do
     pattern = SearchParser.escape_like(term)

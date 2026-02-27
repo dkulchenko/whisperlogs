@@ -22,6 +22,7 @@ defmodule WhisperLogs.Logs.SearchParser do
   @type token ::
           {:term, String.t()}
           | {:phrase, String.t()}
+          | {:exclude_phrase, String.t()}
           | {:exclude, String.t()}
           | {:metadata, String.t(), operator(), String.t()}
           | {:exclude_metadata, String.t(), operator(), String.t()}
@@ -84,6 +85,7 @@ defmodule WhisperLogs.Logs.SearchParser do
     regex = ~r/
       -[\w.-]+:"[^"]*"          |  # -key:"quoted value"
       [\w.-]+:"[^"]*"           |  # key:"quoted value"
+      -"[^"]*"                  |  # -"excluded phrase"
       "[^"]*"                   |  # "quoted phrase"
       -[\w.-]+:>=[\w.-]+        |  # -key:>=value
       -[\w.-]+:<=[\w.-]+        |  # -key:<=value
@@ -121,6 +123,11 @@ defmodule WhisperLogs.Logs.SearchParser do
       # Metadata filter with quoted value: key:"value"
       Regex.match?(~r/^[\w.-]+:"[^"]*"$/, token) ->
         parse_metadata_token(token, :metadata)
+
+      # Negated quoted phrase: -"value"
+      String.starts_with?(token, "-\"") and String.ends_with?(token, "\"") ->
+        value = unquote_value(String.slice(token, 1..-1//1))
+        if value != "", do: {:exclude_phrase, value}, else: nil
 
       # Quoted phrase: "value"
       String.starts_with?(token, "\"") and String.ends_with?(token, "\"") ->
