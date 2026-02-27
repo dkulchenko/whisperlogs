@@ -482,6 +482,19 @@ defmodule WhisperLogsWeb.LogsLive do
                     </code>
                   </div>
 
+                  <div>
+                    <div class="flex items-center gap-2 mb-1">
+                      <.icon name="hero-code-bracket" class="size-3.5 text-green-400" />
+                      <span class="font-medium text-text-primary">Regex Pattern</span>
+                    </div>
+                    <p class="text-text-secondary ml-5">
+                      Use /pattern/ for regex, prefix with - to exclude
+                    </p>
+                    <code class="block mt-1 ml-5 px-2 py-1 bg-bg-surface rounded font-mono">
+                      <span class="text-red-400">-</span><span class="text-green-400">/easypost|healthcheck/</span>
+                    </code>
+                  </div>
+
                   <div class="pt-2 border-t border-border-subtle">
                     <div class="flex items-center gap-2 mb-1">
                       <.icon name="hero-sparkles" class="size-3.5 text-accent-purple" />
@@ -842,7 +855,9 @@ defmodule WhisperLogsWeb.LogsLive do
         { type: 'exclude_metadata_quoted', regex: /-[\w.-]+:"[^"]*"/ },
         { type: 'metadata_quoted', regex: /[\w.-]+:"[^"]*"/ },
         { type: 'exclude_phrase', regex: /-"[^"]*"/ },
+        { type: 'exclude_regex', regex: /-\/(?:[^\/\\]|\\.)+\// },
         { type: 'phrase', regex: /"[^"]*"/ },
+        { type: 'regex', regex: /\/(?:[^\/\\]|\\.)+\// },
         { type: 'exclude_metadata_op', regex: /-[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
         { type: 'metadata_op', regex: /[\w.-]+:(?:>=|<=|>|<)[\w.-]+/ },
         { type: 'exclude_metadata', regex: /-[\w.-]+:[\w.-]+/ },
@@ -868,6 +883,13 @@ defmodule WhisperLogsWeb.LogsLive do
 
           case 'phrase':
             return `<span class="text-amber-400">${escaped}</span>`
+
+          case 'regex':
+            return `<span class="text-green-400">${escaped}</span>`
+
+          case 'exclude_regex':
+            const erBody = token.slice(1) // remove leading -
+            return `<span class="text-red-400">-</span><span class="text-green-400">${erBody.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`
 
           case 'metadata':
           case 'metadata_quoted':
@@ -1476,6 +1498,21 @@ defmodule WhisperLogsWeb.LogsLive do
 
   defp log_matches_token?(log, {:exclude_phrase, phrase}) do
     not log_matches_token?(log, {:term, phrase})
+  end
+
+  defp log_matches_token?(log, {:regex, pattern}) do
+    case Regex.compile(pattern, "i") do
+      {:ok, re} ->
+        Regex.match?(re, log.message) or
+          Enum.any?(log.metadata, fn {_k, v} -> Regex.match?(re, to_string(v)) end)
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  defp log_matches_token?(log, {:exclude_regex, pattern}) do
+    not log_matches_token?(log, {:regex, pattern})
   end
 
   defp log_matches_token?(log, {:exclude, term}) do

@@ -186,6 +186,38 @@ defmodule WhisperLogs.Logs.SearchParserTest do
     end
   end
 
+  describe "regex pattern parsing" do
+    test "parses simple regex" do
+      assert {:ok, [{:regex, "simple"}]} = SearchParser.parse("/simple/")
+    end
+
+    test "parses regex with alternation" do
+      assert {:ok, [{:regex, "error|timeout"}]} = SearchParser.parse("/error|timeout/")
+    end
+
+    test "parses excluded regex" do
+      assert {:ok, [{:exclude_regex, "pattern"}]} = SearchParser.parse("-/pattern/")
+    end
+
+    test "skips invalid regex" do
+      assert {:ok, []} = SearchParser.parse("/invalid[/")
+    end
+
+    test "handles escaped delimiters" do
+      assert {:ok, [{:regex, "path/to/file"}]} = SearchParser.parse("/path\\/to\\/file/")
+    end
+
+    test "combines with other tokens" do
+      {:ok, tokens} = SearchParser.parse("level:warn -/easypost|healthcheck/")
+      assert length(tokens) == 2
+      assert Enum.any?(tokens, fn t -> match?({:level_filter, "warning"}, t) end)
+
+      assert Enum.any?(tokens, fn t ->
+               match?({:exclude_regex, "easypost|healthcheck"}, t)
+             end)
+    end
+  end
+
   describe "combined queries" do
     test "parses multiple pseudo-metadata filters" do
       {:ok, tokens} = SearchParser.parse("level:error timestamp:>-1h source:prod")

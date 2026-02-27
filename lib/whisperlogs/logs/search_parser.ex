@@ -9,6 +9,8 @@ defmodule WhisperLogs.Logs.SearchParser do
   - Negative terms: `-oban` - exclude matches
   - Negative metadata: `-level:debug` - exclude specific metadata key-value
   - Quoted phrases: `"error in module"` - exact phrase match
+  - Regex patterns: `/error|timeout/` - regex match on message or metadata
+  - Negative regex: `-/easypost|healthcheck/` - exclude regex matches
   - Combined: `error user_id:123 -debug` - multiple conditions (AND logic)
 
   Special pseudo-metadata keys (filter on schema fields, not metadata JSONB):
@@ -23,6 +25,8 @@ defmodule WhisperLogs.Logs.SearchParser do
           {:term, String.t()}
           | {:phrase, String.t()}
           | {:exclude_phrase, String.t()}
+          | {:regex, String.t()}
+          | {:exclude_regex, String.t()}
           | {:exclude, String.t()}
           | {:metadata, String.t(), operator(), String.t()}
           | {:exclude_metadata, String.t(), operator(), String.t()}
@@ -82,11 +86,13 @@ defmodule WhisperLogs.Logs.SearchParser do
     # Match: quoted strings with optional -key: prefix, key:op:value pairs, or plain words
     # Order matters - more specific patterns first
     # Added support for comparison operators: >=, <=, >, <
-    regex = ~r/
+    regex = ~r{
       -[\w.-]+:"[^"]*"          |  # -key:"quoted value"
       [\w.-]+:"[^"]*"           |  # key:"quoted value"
       -"[^"]*"                  |  # -"excluded phrase"
+      -/(?:[^/\\]|\\.)+/        |  # -/excluded regex/
       "[^"]*"                   |  # "quoted phrase"
+      /(?:[^/\\]|\\.)+/         |  # /regex/
       -[\w.-]+:>=[\w.-]+        |  # -key:>=value
       -[\w.-]+:<=[\w.-]+        |  # -key:<=value
       -[\w.-]+:>[\w.-]+         |  # -key:>value
@@ -99,7 +105,7 @@ defmodule WhisperLogs.Logs.SearchParser do
       [\w.-]+:[\w.-]+           |  # key:value
       -[\w.-]+                  |  # -term
       [\w.-]+                      # plain term
-    /xu
+    }xu
 
     Regex.scan(regex, query)
     |> Enum.map(fn [match | _] -> match end)
@@ -129,10 +135,20 @@ defmodule WhisperLogs.Logs.SearchParser do
         value = unquote_value(String.slice(token, 1..-1//1))
         if value != "", do: {:exclude_phrase, value}, else: nil
 
+      # Negated regex pattern: -/pattern/
+      String.starts_with?(token, "-/") and String.ends_with?(token, "/") ->
+        pattern = unescape_regex(String.slice(token, 2..-2//1))
+        validate_regex(pattern, :exclude_regex)
+
       # Quoted phrase: "value"
       String.starts_with?(token, "\"") and String.ends_with?(token, "\"") ->
         value = unquote_value(token)
         if value != "", do: {:phrase, value}, else: nil
+
+      # Regex pattern: /pattern/
+      String.starts_with?(token, "/") and String.ends_with?(token, "/") ->
+        pattern = unescape_regex(String.slice(token, 1..-2//1))
+        validate_regex(pattern, :regex)
 
       # Negative metadata filter with operator: -key:>=value, -key:>value, etc.
       Regex.match?(~r/^-[\w.-]+:(?:>=|<=|>|<)[\w.-]+$/, token) ->
@@ -321,6 +337,17 @@ defmodule WhisperLogs.Logs.SearchParser do
     |> String.trim()
     |> String.trim("\"")
     |> String.replace(~r/\\"/, "\"")
+  end
+
+  defp unescape_regex(pattern) do
+    String.replace(pattern, "\\/", "/")
+  end
+
+  defp validate_regex(pattern, type) do
+    case Regex.compile(pattern, "i") do
+      {:ok, _} -> {type, pattern}
+      {:error, _} -> nil
+    end
   end
 
   @doc """

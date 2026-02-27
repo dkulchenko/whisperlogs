@@ -2,9 +2,34 @@ import Config
 
 # Configure both database repos - runtime.exs decides which one to start
 
+# Platform detection for SQLean regexp extension
+sqlean_platform =
+  case :os.type() do
+    {:unix, :darwin} ->
+      arch = :erlang.system_info(:system_architecture) |> List.to_string()
+
+      if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
+        do: "macos-arm64",
+        else: "macos-x64"
+
+    {:unix, :linux} ->
+      arch = :erlang.system_info(:system_architecture) |> List.to_string()
+
+      if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
+        do: "linux-arm64",
+        else: "linux-x64"
+
+    {:win32, _} ->
+      "win-x64"
+  end
+
+sqlean_regexp_ext =
+  Path.expand("../priv/sqlite_extensions/#{sqlean_platform}/regexp", __DIR__)
+
 # SQLite config (used when no DATABASE_URL)
 config :whisperlogs, WhisperLogs.Repo.SQLite,
   database: Path.expand("../priv/dev.db", __DIR__),
+  load_extensions: [sqlean_regexp_ext],
   stacktrace: true,
   show_sensitive_data_on_connection_error: true,
   pool_size: 10,

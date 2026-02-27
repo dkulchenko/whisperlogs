@@ -54,6 +54,50 @@ defmodule WhisperLogs.DbAdapter do
   end
 
   @doc """
+  Regex search in message OR metadata.
+  Returns a dynamic that matches if regex pattern is found in either field.
+  """
+  def text_regex_search(pattern) do
+    if sqlite?() do
+      # Prepend (?i) for case-insensitive PCRE2 matching in SQLean
+      ci_pattern = "(?i)" <> pattern
+
+      dynamic(
+        [l],
+        fragment("? REGEXP ?", l.message, ^ci_pattern) or
+          fragment("json(?) REGEXP ?", l.metadata, ^ci_pattern)
+      )
+    else
+      dynamic(
+        [l],
+        fragment("? ~* ?", l.message, ^pattern) or
+          fragment("?::text ~* ?", l.metadata, ^pattern)
+      )
+    end
+  end
+
+  @doc """
+  Exclude regex search - matches if regex pattern is NOT found in message AND metadata.
+  """
+  def text_regex_exclude(pattern) do
+    if sqlite?() do
+      ci_pattern = "(?i)" <> pattern
+
+      dynamic(
+        [l],
+        fragment("NOT (? REGEXP ?)", l.message, ^ci_pattern) and
+          fragment("NOT (json(?) REGEXP ?)", l.metadata, ^ci_pattern)
+      )
+    else
+      dynamic(
+        [l],
+        fragment("? !~* ?", l.message, ^pattern) and
+          fragment("?::text !~* ?", l.metadata, ^pattern)
+      )
+    end
+  end
+
+  @doc """
   Exclude text search - matches if pattern is NOT found in message AND metadata.
   """
   def text_exclude(pattern) do

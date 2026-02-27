@@ -272,6 +272,16 @@ defmodule WhisperLogs.Logs do
     where(query, ^DbAdapter.text_exclude(pattern))
   end
 
+  # Regex pattern: match message OR metadata against regex
+  defp apply_search_token({:regex, pattern}, query) do
+    where(query, ^DbAdapter.text_regex_search(pattern))
+  end
+
+  # Exclude regex: NOT in message AND NOT in metadata
+  defp apply_search_token({:exclude_regex, pattern}, query) do
+    where(query, ^DbAdapter.text_regex_exclude(pattern))
+  end
+
   # Exclude term: NOT in message AND NOT in metadata
   defp apply_search_token({:exclude, term}, query) do
     pattern = SearchParser.escape_like(term)
