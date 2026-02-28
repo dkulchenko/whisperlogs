@@ -698,10 +698,11 @@ defmodule WhisperLogsWeb.LogsLive do
 
                   <div class="mt-2 pt-2 border-t border-border-subtle">
                     <%= if @show_save_form do %>
-                      <form phx-submit="save-search" class="flex items-center gap-2">
+                      <div class="flex items-center gap-2">
                         <input
                           type="text"
                           name="name"
+                          form="save-search-form"
                           placeholder="Search name..."
                           class="flex-1 bg-bg-surface border border-border-default rounded-lg px-2 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary placeholder:text-text-tertiary"
                           autofocus
@@ -709,6 +710,7 @@ defmodule WhisperLogsWeb.LogsLive do
                         />
                         <button
                           type="submit"
+                          form="save-search-form"
                           class="px-2 py-1.5 bg-purple-500/10 text-purple-400 rounded-lg text-smaller font-medium hover:bg-purple-500/20 transition-colors border border-purple-500/30"
                         >
                           Save
@@ -720,7 +722,7 @@ defmodule WhisperLogsWeb.LogsLive do
                         >
                           <.icon name="hero-x-mark" class="size-3.5 text-text-tertiary" />
                         </button>
-                      </form>
+                      </div>
                     <% else %>
                       <button
                         type="button"
@@ -736,6 +738,7 @@ defmodule WhisperLogsWeb.LogsLive do
             </div>
           </div>
         </form>
+        <form id="save-search-form" phx-submit="save-search" class="hidden"></form>
       </div>
     </Layouts.app>
 
@@ -1486,7 +1489,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
     metadata_match =
       Enum.any?(log.metadata, fn {_k, v} ->
-        String.contains?(String.downcase(to_string(v)), term_lower)
+        String.contains?(String.downcase(stringify_value(v)), term_lower)
       end)
 
     message_match or metadata_match
@@ -1504,7 +1507,7 @@ defmodule WhisperLogsWeb.LogsLive do
     case Regex.compile(pattern, "i") do
       {:ok, re} ->
         Regex.match?(re, log.message) or
-          Enum.any?(log.metadata, fn {_k, v} -> Regex.match?(re, to_string(v)) end)
+          Enum.any?(log.metadata, fn {_k, v} -> Regex.match?(re, stringify_value(v)) end)
 
       {:error, _} ->
         false
@@ -1522,7 +1525,7 @@ defmodule WhisperLogsWeb.LogsLive do
   defp log_matches_token?(log, {:metadata, key, :eq, value}) do
     case Map.get(log.metadata, key) do
       nil -> false
-      v -> String.contains?(String.downcase(to_string(v)), String.downcase(value))
+      v -> String.contains?(String.downcase(stringify_value(v)), String.downcase(value))
     end
   end
 
@@ -1536,7 +1539,7 @@ defmodule WhisperLogsWeb.LogsLive do
   defp log_matches_token?(log, {:exclude_metadata, key, :eq, value}) do
     case Map.get(log.metadata, key) do
       nil -> true
-      v -> not String.contains?(String.downcase(to_string(v)), String.downcase(value))
+      v -> not String.contains?(String.downcase(stringify_value(v)), String.downcase(value))
     end
   end
 
@@ -1697,6 +1700,12 @@ defmodule WhisperLogsWeb.LogsLive do
     }
     |> Jason.encode!(pretty: true)
   end
+
+  # Safe stringification for metadata values that may be maps, lists, etc.
+  # Used by live filtering to avoid String.Chars crash on non-primitive values.
+  defp stringify_value(v) when is_binary(v), do: v
+  defp stringify_value(v) when is_atom(v) or is_number(v), do: to_string(v)
+  defp stringify_value(v), do: Jason.encode!(v)
 
   defp format_metadata_value(value) when is_binary(value), do: value
   defp format_metadata_value(value) when is_number(value), do: to_string(value)
