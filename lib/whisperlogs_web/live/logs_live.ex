@@ -315,12 +315,12 @@ defmodule WhisperLogsWeb.LogsLive do
                   class="ml-3 size-4 text-text-tertiary shrink-0"
                 />
                 <%!-- Search input wrapper with overlay --%>
-                <div class="relative flex-1">
+                <div class="relative flex-1 ml-2">
                   <%!-- Syntax highlight overlay --%>
                   <div
                     id="search-highlight-overlay"
                     phx-update="ignore"
-                    class="absolute inset-0 pl-2 py-1.5 text-smaller font-mono whitespace-pre pointer-events-none overflow-hidden leading-normal"
+                    class="absolute inset-0 pr-1 py-1.5 text-smaller font-mono whitespace-pre pointer-events-none overflow-hidden leading-normal"
                     aria-hidden="true"
                   >
                   </div>
@@ -333,7 +333,7 @@ defmodule WhisperLogsWeb.LogsLive do
                     phx-debounce="300"
                     phx-hook=".SearchHighlight"
                     placeholder="Search... (key:value -exclude 'phrase')"
-                    class="w-full bg-transparent pl-2 pr-1 py-1.5 text-smaller text-transparent caret-text-primary placeholder:text-text-tertiary focus:outline-none font-mono"
+                    class="w-full bg-transparent pr-1 py-1.5 text-smaller text-transparent caret-text-primary placeholder:text-text-tertiary focus:outline-none font-mono"
                     autocomplete="off"
                     autocorrect="off"
                     autocapitalize="off"
@@ -995,13 +995,24 @@ defmodule WhisperLogsWeb.LogsLive do
         mounted() {
           this.overlay = document.getElementById('search-highlight-overlay')
           this.updateHighlight()
+          this.syncScroll()
 
           this.el.addEventListener('input', () => this.updateHighlight())
           this.el.addEventListener('focus', () => this.updateHighlight())
+          this.el.addEventListener('scroll', () => this.syncScroll())
+          this.el.addEventListener('keyup', () => this.syncScroll())
+          this.el.addEventListener('click', () => this.syncScroll())
         },
 
         updated() {
           this.updateHighlight()
+          this.syncScroll()
+        },
+
+        syncScroll() {
+          if (this.overlay) {
+            this.overlay.scrollLeft = this.el.scrollLeft
+          }
         },
 
         updateHighlight() {
@@ -1012,6 +1023,7 @@ defmodule WhisperLogsWeb.LogsLive do
             } else {
               this.overlay.innerHTML = parseAndHighlight(value)
             }
+            this.syncScroll()
           }
         }
       }
