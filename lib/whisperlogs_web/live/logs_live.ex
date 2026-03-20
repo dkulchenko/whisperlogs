@@ -42,6 +42,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:cursor_bottom, nil)
      |> assign(:has_older?, false)
      |> assign(:has_newer?, false)
+     |> assign(:loading_logs?, !connected?(socket))
      |> assign(:loading_older?, false)
      |> assign(:loading_newer?, false)
      |> assign(:scroll_to_date, "")
@@ -144,7 +145,18 @@ defmodule WhisperLogsWeb.LogsLive do
             <span class="ml-2 text-xs text-text-tertiary">Loading older logs...</span>
           </div>
 
-          <div id="logs" phx-update="stream" class="divide-y divide-border-subtle">
+          <%= if @loading_logs? do %>
+            <div class="flex flex-col items-center justify-center py-20 text-text-tertiary">
+              <.icon name="hero-arrow-path" class="size-8 animate-spin text-accent-purple mb-4" />
+              <p class="text-lg font-medium text-text-secondary">Loading logs...</p>
+            </div>
+          <% end %>
+
+          <div
+            id="logs"
+            phx-update="stream"
+            class={["divide-y divide-border-subtle", @loading_logs? && "hidden"]}
+          >
             <div
               id="logs-empty"
               class="hidden only:flex flex-col items-center justify-center py-20 text-text-tertiary"
@@ -1039,24 +1051,48 @@ defmodule WhisperLogsWeb.LogsLive do
     filters = params_to_filters(params)
 
     if connected?(socket) do
-      logs = fetch_logs(filters)
-      {cursor_top, cursor_bottom} = extract_cursors(logs)
-      has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
-
       {:noreply,
        socket
        |> assign(:filters, filters)
-       |> assign(:cursor_top, cursor_top)
-       |> assign(:cursor_bottom, cursor_bottom)
-       |> assign(:has_older?, has_older?)
-       |> assign(:has_newer?, false)
-       |> assign(:at_bottom?, true)
-       |> assign(:far_from_bottom?, false)
-       |> assign(:log_buffer, [])
-       |> stream(:logs, logs, reset: true)}
+       |> assign(:loading_logs?, true)
+       |> stream(:logs, [], reset: true)
+       |> start_async(:fetch_logs, fn ->
+         opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
+         logs = Logs.list_logs(opts) |> Enum.reverse()
+         {cursor_top, cursor_bottom} = extract_cursors(logs)
+
+         has_older? =
+           cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
+
+         %{
+           logs: logs,
+           cursor_top: cursor_top,
+           cursor_bottom: cursor_bottom,
+           has_older?: has_older?
+         }
+       end)}
     else
       {:noreply, assign(socket, :filters, filters)}
     end
+  end
+
+  @impl true
+  def handle_async(:fetch_logs, {:ok, result}, socket) do
+    {:noreply,
+     socket
+     |> assign(:loading_logs?, false)
+     |> assign(:cursor_top, result.cursor_top)
+     |> assign(:cursor_bottom, result.cursor_bottom)
+     |> assign(:has_older?, result.has_older?)
+     |> assign(:has_newer?, false)
+     |> assign(:at_bottom?, true)
+     |> assign(:far_from_bottom?, false)
+     |> assign(:log_buffer, [])
+     |> stream(:logs, result.logs, reset: true)}
+  end
+
+  def handle_async(:fetch_logs, {:exit, _reason}, socket) do
+    {:noreply, assign(socket, :loading_logs?, false)}
   end
 
   @impl true

@@ -11,7 +11,7 @@ defmodule WhisperLogsWeb.MetricsLive do
     socket =
       socket
       |> assign(:page_title, "Metrics")
-      |> assign(:loading, not connected?(socket))
+      |> assign(:loading, true)
       |> assign(:total_count, 0)
       |> assign(:total_bytes, 0)
       |> assign(:retention_days, Retention.retention_days())
@@ -25,30 +25,68 @@ defmodule WhisperLogsWeb.MetricsLive do
     socket =
       if connected?(socket) do
         start_async(socket, :load_metrics, fn ->
-          total_count = Logs.count_logs()
-          hourly_data = Logs.volume_by_hour(48)
-          daily_data = Logs.volume_by_day(30)
-          monthly_data = Logs.volume_by_month(12)
-          {projected_30d_count, projected_30d_bytes} = calculate_30d_projection()
-
-          total_bytes =
-            Enum.reduce(daily_data, 0, fn {_, _, bytes}, acc -> acc + (bytes || 0) end)
-
-          %{
-            total_count: total_count,
-            total_bytes: total_bytes,
-            hourly_data: hourly_data,
-            daily_data: daily_data,
-            monthly_data: monthly_data,
-            projected_30d_count: projected_30d_count,
-            projected_30d_bytes: projected_30d_bytes
-          }
+          load_metrics_data()
         end)
       else
         socket
       end
 
     {:ok, socket}
+  end
+
+  # Run only 2 DB queries instead of 6:
+  # 1) daily volume for last 12 months (the expensive length() scan, done once)
+  # 2) hourly volume for last 48h (small dataset, fast)
+  # Everything else is derived in Elixir from these two results.
+  defp load_metrics_data do
+    hourly_data = Logs.volume_by_hour(48)
+    daily_data = Logs.volume_by_day(365)
+
+    # Monthly: roll up daily data in Elixir
+    monthly_data =
+      daily_data
+      |> Enum.group_by(fn {dt, _, _} -> {dt.year, dt.month} end)
+      |> Enum.map(fn {{year, month}, days} ->
+        count = Enum.sum(Enum.map(days, fn {_, c, _} -> c end))
+        bytes = Enum.sum(Enum.map(days, fn {_, _, b} -> b || 0 end))
+        {:ok, dt} = DateTime.new(Date.new!(year, month, 1), ~T[00:00:00], "Etc/UTC")
+        {dt, count, bytes}
+      end)
+      |> Enum.sort_by(fn {dt, _, _} -> DateTime.to_unix(dt) end)
+
+    # Totals: sum all daily data
+    total_count = Enum.sum(Enum.map(daily_data, fn {_, c, _} -> c end))
+    total_bytes = Enum.sum(Enum.map(daily_data, fn {_, _, b} -> b || 0 end))
+
+    # Projection: use last 48h of hourly data for velocity estimate
+    {projected_30d_count, projected_30d_bytes} =
+      calculate_30d_projection(hourly_data)
+
+    %{
+      total_count: total_count,
+      total_bytes: total_bytes,
+      hourly_data: hourly_data,
+      daily_data:
+        Enum.filter(daily_data, fn {dt, _, _} ->
+          DateTime.diff(DateTime.utc_now(), dt, :day) <= 30
+        end),
+      monthly_data: monthly_data,
+      projected_30d_count: projected_30d_count,
+      projected_30d_bytes: projected_30d_bytes
+    }
+  end
+
+  defp calculate_30d_projection([]), do: {0, 0}
+
+  defp calculate_30d_projection(hourly_data) do
+    hours = length(hourly_data) |> max(1)
+    total_count = Enum.sum(Enum.map(hourly_data, fn {_, c, _} -> c end))
+    total_bytes = Enum.sum(Enum.map(hourly_data, fn {_, _, b} -> b || 0 end))
+
+    hourly_avg_count = total_count / hours
+    hourly_avg_bytes = total_bytes / hours
+
+    {round(hourly_avg_count * 24 * 30), round(hourly_avg_bytes * 24 * 30)}
   end
 
   @impl true
@@ -62,9 +100,11 @@ defmodule WhisperLogsWeb.MetricsLive do
      |> assign(:daily_data, metrics.daily_data)
      |> assign(:monthly_data, metrics.monthly_data)
      |> assign(:projected_30d_count, metrics.projected_30d_count)
-     |> assign(:projected_30d_bytes, metrics.projected_30d_bytes)}
+     |> assign(:projected_30d_bytes, metrics.projected_30d_bytes)
+     |> push_event("chart-data", %{data: chart_data(socket.assigns.time_range, metrics)})}
   end
 
+  @impl true
   def handle_async(:load_metrics, {:exit, reason}, socket) do
     Logger.error("Failed to load metrics: #{inspect(reason)}")
     {:noreply, assign(socket, :loading, false)}
@@ -84,8 +124,9 @@ defmodule WhisperLogsWeb.MetricsLive do
           </.header>
 
           <%= if @loading do %>
-            <div class="mt-16 flex justify-center">
-              <div class="text-text-secondary">Loading metrics...</div>
+            <div class="mt-16 flex flex-col items-center justify-center py-20">
+              <.icon name="hero-arrow-path" class="size-8 animate-spin text-accent-purple mb-4" />
+              <p class="text-text-secondary">Loading metrics...</p>
             </div>
           <% else %>
             <%!-- Summary Cards --%>
@@ -146,7 +187,6 @@ defmodule WhisperLogsWeb.MetricsLive do
                 id="volume-chart"
                 phx-hook=".VolumeChart"
                 phx-update="ignore"
-                data-chart-data={chart_data(@time_range, assigns)}
                 class="w-full h-80"
               >
               </div>
@@ -202,16 +242,15 @@ defmodule WhisperLogsWeb.MetricsLive do
       export default {
         mounted() {
           this.chart = echarts.init(this.el, null, { renderer: 'canvas' })
-          this.renderChart()
+
+          this.handleEvent("chart-data", ({data}) => {
+            this.renderChart(data)
+          })
 
           this.resizeObserver = new ResizeObserver(() => {
             this.chart.resize()
           })
           this.resizeObserver.observe(this.el)
-        },
-
-        updated() {
-          this.renderChart()
         },
 
         destroyed() {
@@ -223,9 +262,7 @@ defmodule WhisperLogsWeb.MetricsLive do
           }
         },
 
-        renderChart() {
-          const data = JSON.parse(this.el.dataset.chartData)
-
+        renderChart(data) {
           const option = {
             tooltip: {
               trigger: 'axis',
@@ -335,36 +372,34 @@ defmodule WhisperLogsWeb.MetricsLive do
 
   @impl true
   def handle_event("set_time_range", %{"range" => range}, socket) do
-    {:noreply, assign(socket, :time_range, range)}
+    data = chart_data(range, socket.assigns)
+
+    {:noreply,
+     socket
+     |> assign(:time_range, range)
+     |> push_event("chart-data", %{data: data})}
   end
 
-  # Calculate 30-day projection based on actual data velocity.
-  # Uses up to the last 48 hours of data, but correctly handles cases
-  # where less data exists (e.g., only 2 hours since first log).
-  defp calculate_30d_projection do
-    now = DateTime.utc_now()
-    oldest = Logs.oldest_log_timestamp()
+  defp chart_data("hourly", %{hourly_data: data}), do: build_chart_map(data, "hourly")
+  defp chart_data("daily", %{daily_data: data}), do: build_chart_map(data, "daily")
+  defp chart_data("monthly", %{monthly_data: data}), do: build_chart_map(data, "monthly")
 
-    case oldest do
-      nil ->
-        # No logs yet
-        {0, 0}
+  # Accept both assigns map and metrics map
+  defp chart_data(range, assigns) when is_map(assigns) do
+    data = Map.get(assigns, String.to_existing_atom("#{range}_data"), [])
+    build_chart_map(data, range)
+  end
 
-      oldest_ts ->
-        # Calculate actual hours of data we have (capped at 48 for stability)
-        hours_of_data = DateTime.diff(now, oldest_ts, :second) / 3600
-        sample_hours = min(hours_of_data, 48) |> max(1)
+  defp table_data("hourly", assigns), do: Enum.reverse(assigns.hourly_data)
+  defp table_data("daily", assigns), do: Enum.reverse(assigns.daily_data)
+  defp table_data("monthly", assigns), do: Enum.reverse(assigns.monthly_data)
 
-        # Get volume for the sample period
-        {count, bytes} = Logs.volume_last_n_hours(ceil(sample_hours))
+  defp build_chart_map(data, range) do
+    labels = Enum.map(data, fn {dt, _, _} -> format_chart_label(dt, range) end)
+    counts = Enum.map(data, fn {_, count, _} -> count end)
+    bytes = Enum.map(data, fn {_, _, b} -> b || 0 end)
 
-        # Calculate hourly velocity based on actual data span
-        hourly_avg_count = count / sample_hours
-        hourly_avg_bytes = bytes / sample_hours
-
-        # Extrapolate to 30 days
-        {round(hourly_avg_count * 24 * 30), round(hourly_avg_bytes * 24 * 30)}
-    end
+    %{labels: labels, counts: counts, bytes: bytes}
   end
 
   defp format_count(nil), do: "0"
@@ -400,22 +435,6 @@ defmodule WhisperLogsWeb.MetricsLive do
 
   defp format_period(datetime, "monthly") do
     Calendar.strftime(datetime, "%B %Y")
-  end
-
-  defp chart_data("hourly", assigns), do: build_chart_json(assigns.hourly_data, "hourly")
-  defp chart_data("daily", assigns), do: build_chart_json(assigns.daily_data, "daily")
-  defp chart_data("monthly", assigns), do: build_chart_json(assigns.monthly_data, "monthly")
-
-  defp table_data("hourly", assigns), do: Enum.reverse(assigns.hourly_data)
-  defp table_data("daily", assigns), do: Enum.reverse(assigns.daily_data)
-  defp table_data("monthly", assigns), do: Enum.reverse(assigns.monthly_data)
-
-  defp build_chart_json(data, range) do
-    labels = Enum.map(data, fn {dt, _, _} -> format_chart_label(dt, range) end)
-    counts = Enum.map(data, fn {_, count, _} -> count end)
-    bytes = Enum.map(data, fn {_, _, b} -> b || 0 end)
-
-    Jason.encode!(%{labels: labels, counts: counts, bytes: bytes})
   end
 
   defp format_chart_label(datetime, "hourly"), do: Calendar.strftime(datetime, "%H:00")

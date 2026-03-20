@@ -42,7 +42,8 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
   describe "mount and render" do
     test "renders logs page", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
 
       # Check for filter form elements
       assert html =~ "filters-form"
@@ -50,7 +51,8 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     end
 
     test "renders empty state when no logs", %{conn: conn} do
-      {:ok, _lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
 
       assert html =~ "No logs yet"
       assert html =~ "Start sending logs"
@@ -59,7 +61,8 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     test "displays logs when present", %{conn: conn} do
       _log = log_fixture("test-source", message: "Hello from test")
 
-      {:ok, _lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
 
       assert html =~ "Hello from test"
       assert html =~ "test-source"
@@ -68,7 +71,8 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     test "shows source in filter dropdown when logs exist", %{conn: conn} do
       _log = log_fixture("my-app-logs", message: "Test message")
 
-      {:ok, _lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
 
       assert html =~ "my-app-logs"
     end
@@ -86,12 +90,14 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "filters by level when checkbox clicked", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
       # Uncheck "debug" level
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"levels" => ["info", "warning", "error"]})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"levels" => ["info", "warning", "error"]})
+
+      html = render_async(lv)
 
       # Debug should be excluded
       refute html =~ "Debug message"
@@ -104,11 +110,13 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       _other_log = log_fixture("other-source", message: "Other source log")
 
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"source" => "test-source"})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"source" => "test-source"})
+
+      html = render_async(lv)
 
       assert html =~ "Debug message"
       refute html =~ "Other source log"
@@ -116,17 +124,21 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "clears filters", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
       # Apply a filter first
       lv
       |> element("#filters-form")
       |> render_change(%{"levels" => ["error"]})
 
+      render_async(lv)
+
       # Clear filters
-      html =
-        lv
-        |> element("button", "Clear")
-        |> render_click()
+      lv
+      |> element("button", "Clear")
+      |> render_click()
+
+      html = render_async(lv)
 
       # All levels should be shown again
       assert html =~ "Debug message"
@@ -153,11 +165,13 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "searches by message content", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"search" => "timeout"})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => "timeout"})
+
+      html = render_async(lv)
 
       assert html =~ "Connection timeout error"
       refute html =~ "User login successful"
@@ -165,11 +179,13 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "searches by metadata key:value", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"search" => "user_id:123"})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => "user_id:123"})
+
+      html = render_async(lv)
 
       assert html =~ "Request processed"
       refute html =~ "User login successful"
@@ -177,11 +193,13 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "excludes terms with - prefix", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"search" => "-timeout"})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => "-timeout"})
+
+      html = render_async(lv)
 
       refute html =~ "Connection timeout error"
       assert html =~ "User login successful"
@@ -191,7 +209,8 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
   describe "live tail" do
     test "toggles live tail on/off", %{conn: conn} do
-      {:ok, lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
 
       # Initially live tail is on
       assert html =~ "Live"
@@ -207,6 +226,7 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
     test "receives new logs via PubSub when live tail is on", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
+      render_async(lv)
 
       # Create a new log - this should trigger PubSub broadcast
       _new_log = log_fixture("test-source", message: "New real-time log")
@@ -225,15 +245,16 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       # Create a recent log
       _recent = log_fixture("test-source", message: "Recent log")
 
-      {:ok, lv, html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/")
+      html = render_async(lv)
       assert html =~ "Recent log"
 
       # Change to 24h - should still show the log
-      html =
-        lv
-        |> element("#filters-form")
-        |> render_change(%{"time_range" => "24h"})
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"time_range" => "24h"})
 
+      html = render_async(lv)
       assert html =~ "Recent log"
     end
   end
