@@ -410,10 +410,13 @@ defmodule WhisperLogs.Logs do
   Returns a list of distinct sources.
   """
   def list_sources do
-    Log
-    |> select([l], l.source)
+    alias WhisperLogs.Accounts.Source
+
+    Source
+    |> where([s], is_nil(s.revoked_at))
+    |> select([s], s.source)
     |> distinct(true)
-    |> order_by([l], asc: l.source)
+    |> order_by([s], asc: s.source)
     |> Repo.all()
   end
 

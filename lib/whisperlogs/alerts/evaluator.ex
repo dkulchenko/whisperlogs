@@ -20,6 +20,7 @@ defmodule WhisperLogs.Alerts.Evaluator do
   import Ecto.Query, warn: false
 
   @evaluation_interval :timer.seconds(30)
+  @query_timeout 10_000
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -145,7 +146,7 @@ defmodule WhisperLogs.Alerts.Evaluator do
 
         query_with_filter
         |> Logs.apply_search_tokens(tokens)
-        |> Repo.one()
+        |> Repo.one(timeout: @query_timeout)
     end
   end
 
@@ -178,7 +179,7 @@ defmodule WhisperLogs.Alerts.Evaluator do
 
         query_with_filter
         |> Logs.apply_search_tokens(tokens)
-        |> Repo.one()
+        |> Repo.one(timeout: @query_timeout)
     end
   end
 
@@ -238,7 +239,7 @@ defmodule WhisperLogs.Alerts.Evaluator do
         Log
         |> where([l], l.timestamp >= ^cutoff)
         |> Logs.apply_search_tokens(tokens)
-        |> Repo.aggregate(:count, :id)
+        |> Repo.aggregate(:count, :id, timeout: @query_timeout)
     end
   end
 end

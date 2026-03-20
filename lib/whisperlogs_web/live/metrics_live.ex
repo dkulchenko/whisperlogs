@@ -1,37 +1,73 @@
 defmodule WhisperLogsWeb.MetricsLive do
   use WhisperLogsWeb, :live_view
 
+  require Logger
+
   alias WhisperLogs.Logs
   alias WhisperLogs.Retention
 
   @impl true
   def mount(_params, _session, socket) do
-    total_count = Logs.count_logs()
-    retention_days = Retention.retention_days()
+    socket =
+      socket
+      |> assign(:page_title, "Metrics")
+      |> assign(:loading, not connected?(socket))
+      |> assign(:total_count, 0)
+      |> assign(:total_bytes, 0)
+      |> assign(:retention_days, Retention.retention_days())
+      |> assign(:hourly_data, [])
+      |> assign(:daily_data, [])
+      |> assign(:monthly_data, [])
+      |> assign(:projected_30d_count, 0)
+      |> assign(:projected_30d_bytes, 0)
+      |> assign(:time_range, "daily")
 
-    hourly_data = Logs.volume_by_hour(48)
-    daily_data = Logs.volume_by_day(30)
-    monthly_data = Logs.volume_by_month(12)
+    socket =
+      if connected?(socket) do
+        start_async(socket, :load_metrics, fn ->
+          total_count = Logs.count_logs()
+          hourly_data = Logs.volume_by_hour(48)
+          daily_data = Logs.volume_by_day(30)
+          monthly_data = Logs.volume_by_month(12)
+          {projected_30d_count, projected_30d_bytes} = calculate_30d_projection()
 
-    # Calculate projections based on actual data velocity
-    {projected_30d_count, projected_30d_bytes} = calculate_30d_projection()
+          total_bytes =
+            Enum.reduce(daily_data, 0, fn {_, _, bytes}, acc -> acc + (bytes || 0) end)
 
-    # Calculate total stored volume from all data
-    total_bytes =
-      Enum.reduce(daily_data, 0, fn {_, _, bytes}, acc -> acc + (bytes || 0) end)
+          %{
+            total_count: total_count,
+            total_bytes: total_bytes,
+            hourly_data: hourly_data,
+            daily_data: daily_data,
+            monthly_data: monthly_data,
+            projected_30d_count: projected_30d_count,
+            projected_30d_bytes: projected_30d_bytes
+          }
+        end)
+      else
+        socket
+      end
 
-    {:ok,
+    {:ok, socket}
+  end
+
+  @impl true
+  def handle_async(:load_metrics, {:ok, metrics}, socket) do
+    {:noreply,
      socket
-     |> assign(:page_title, "Metrics")
-     |> assign(:total_count, total_count)
-     |> assign(:total_bytes, total_bytes)
-     |> assign(:retention_days, retention_days)
-     |> assign(:hourly_data, hourly_data)
-     |> assign(:daily_data, daily_data)
-     |> assign(:monthly_data, monthly_data)
-     |> assign(:projected_30d_count, projected_30d_count)
-     |> assign(:projected_30d_bytes, projected_30d_bytes)
-     |> assign(:time_range, "daily")}
+     |> assign(:loading, false)
+     |> assign(:total_count, metrics.total_count)
+     |> assign(:total_bytes, metrics.total_bytes)
+     |> assign(:hourly_data, metrics.hourly_data)
+     |> assign(:daily_data, metrics.daily_data)
+     |> assign(:monthly_data, metrics.monthly_data)
+     |> assign(:projected_30d_count, metrics.projected_30d_count)
+     |> assign(:projected_30d_bytes, metrics.projected_30d_bytes)}
+  end
+
+  def handle_async(:load_metrics, {:exit, reason}, socket) do
+    Logger.error("Failed to load metrics: #{inspect(reason)}")
+    {:noreply, assign(socket, :loading, false)}
   end
 
   @impl true
@@ -47,111 +83,117 @@ defmodule WhisperLogsWeb.MetricsLive do
             </:subtitle>
           </.header>
 
-          <%!-- Summary Cards --%>
-          <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <.stat_card
-              title="Total Logs Stored"
-              value={format_count(@total_count)}
-              subtitle={"Retention: #{@retention_days} days"}
-              icon="hero-document-text"
-            />
-            <.stat_card
-              title="Total Volume"
-              value={format_bytes(@total_bytes)}
-              subtitle={format_count(@total_count) <> " entries"}
-              icon="hero-server-stack"
-            />
-            <.stat_card
-              title="30-Day Projection"
-              value={"~" <> format_bytes(@projected_30d_bytes)}
-              subtitle={format_count(@projected_30d_count) <> " logs"}
-              icon="hero-chart-bar"
-            />
-            <.stat_card
-              title="Retention Period"
-              value={"#{@retention_days} days"}
-              subtitle="Configurable via env"
-              icon="hero-clock"
-            />
-          </div>
-
-          <%!-- Time Range Selector --%>
-          <div class="mt-8 flex items-center gap-2">
-            <span class="text-sm text-text-secondary">View:</span>
-            <div class="flex gap-1">
-              <button
-                :for={range <- ~w(hourly daily monthly)}
-                type="button"
-                phx-click="set_time_range"
-                phx-value-range={range}
-                class={[
-                  "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
-                  @time_range == range && "bg-accent-purple text-white",
-                  @time_range != range &&
-                    "bg-bg-surface text-text-secondary hover:text-text-primary hover:bg-bg-muted"
-                ]}
-              >
-                {String.capitalize(range)}
-              </button>
+          <%= if @loading do %>
+            <div class="mt-16 flex justify-center">
+              <div class="text-text-secondary">Loading metrics...</div>
             </div>
-          </div>
-
-          <%!-- Volume Chart --%>
-          <div class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6">
-            <h3 class="text-lg font-semibold text-text-primary mb-4">
-              Log Volume - {String.capitalize(@time_range)}
-            </h3>
-            <div
-              id="volume-chart"
-              phx-hook=".VolumeChart"
-              phx-update="ignore"
-              data-chart-data={chart_data(@time_range, assigns)}
-              class="w-full h-80"
-            >
+          <% else %>
+            <%!-- Summary Cards --%>
+            <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <.stat_card
+                title="Total Logs Stored"
+                value={format_count(@total_count)}
+                subtitle={"Retention: #{@retention_days} days"}
+                icon="hero-document-text"
+              />
+              <.stat_card
+                title="Total Volume"
+                value={format_bytes(@total_bytes)}
+                subtitle={format_count(@total_count) <> " entries"}
+                icon="hero-server-stack"
+              />
+              <.stat_card
+                title="30-Day Projection"
+                value={"~" <> format_bytes(@projected_30d_bytes)}
+                subtitle={format_count(@projected_30d_count) <> " logs"}
+                icon="hero-chart-bar"
+              />
+              <.stat_card
+                title="Retention Period"
+                value={"#{@retention_days} days"}
+                subtitle="Configurable via env"
+                icon="hero-clock"
+              />
             </div>
-          </div>
 
-          <%!-- Data Table --%>
-          <div class="mt-8 bg-bg-elevated border border-border-default rounded-lg overflow-hidden">
-            <div class="px-6 py-4 border-b border-border-default">
-              <h3 class="text-lg font-semibold text-text-primary">
-                Volume Breakdown
+            <%!-- Time Range Selector --%>
+            <div class="mt-8 flex items-center gap-2">
+              <span class="text-sm text-text-secondary">View:</span>
+              <div class="flex gap-1">
+                <button
+                  :for={range <- ~w(hourly daily monthly)}
+                  type="button"
+                  phx-click="set_time_range"
+                  phx-value-range={range}
+                  class={[
+                    "px-3 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                    @time_range == range && "bg-accent-purple text-white",
+                    @time_range != range &&
+                      "bg-bg-surface text-text-secondary hover:text-text-primary hover:bg-bg-muted"
+                  ]}
+                >
+                  {String.capitalize(range)}
+                </button>
+              </div>
+            </div>
+
+            <%!-- Volume Chart --%>
+            <div class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6">
+              <h3 class="text-lg font-semibold text-text-primary mb-4">
+                Log Volume - {String.capitalize(@time_range)}
               </h3>
+              <div
+                id="volume-chart"
+                phx-hook=".VolumeChart"
+                phx-update="ignore"
+                data-chart-data={chart_data(@time_range, assigns)}
+                class="w-full h-80"
+              >
+              </div>
             </div>
-            <div class="overflow-x-auto">
-              <table class="w-full">
-                <thead class="bg-bg-surface">
-                  <tr>
-                    <th class="px-6 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider">
-                      Period
-                    </th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
-                      Log Count
-                    </th>
-                    <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
-                      Volume
-                    </th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-border-subtle">
-                  <tr
-                    :for={{period, count, bytes} <- table_data(@time_range, assigns)}
-                    class="hover:bg-bg-surface/50"
-                  >
-                    <td class="px-6 py-3 text-sm text-text-primary font-mono">
-                      {format_period(period, @time_range)}
-                    </td>
-                    <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
-                      {format_count(count)}
-                    </td>
-                    <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
-                      {format_bytes(bytes || 0)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+
+            <%!-- Data Table --%>
+            <div class="mt-8 bg-bg-elevated border border-border-default rounded-lg overflow-hidden">
+              <div class="px-6 py-4 border-b border-border-default">
+                <h3 class="text-lg font-semibold text-text-primary">
+                  Volume Breakdown
+                </h3>
+              </div>
+              <div class="overflow-x-auto">
+                <table class="w-full">
+                  <thead class="bg-bg-surface">
+                    <tr>
+                      <th class="px-6 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                        Period
+                      </th>
+                      <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                        Log Count
+                      </th>
+                      <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                        Volume
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-border-subtle">
+                    <tr
+                      :for={{period, count, bytes} <- table_data(@time_range, assigns)}
+                      class="hover:bg-bg-surface/50"
+                    >
+                      <td class="px-6 py-3 text-sm text-text-primary font-mono">
+                        {format_period(period, @time_range)}
+                      </td>
+                      <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
+                        {format_count(count)}
+                      </td>
+                      <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
+                        {format_bytes(bytes || 0)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
+          <% end %>
         </div>
       </div>
     </Layouts.app>

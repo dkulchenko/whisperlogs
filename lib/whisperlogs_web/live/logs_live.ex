@@ -12,17 +12,20 @@ defmodule WhisperLogsWeb.LogsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      Logs.subscribe()
-    end
+    {sources, saved_searches} =
+      if connected?(socket) do
+        Logs.subscribe()
 
-    sources = Logs.list_sources()
+        searches =
+          if socket.assigns[:current_scope] && socket.assigns.current_scope.user do
+            Logs.list_saved_searches(socket.assigns.current_scope.user)
+          else
+            []
+          end
 
-    saved_searches =
-      if socket.assigns[:current_scope] && socket.assigns.current_scope.user do
-        Logs.list_saved_searches(socket.assigns.current_scope.user)
+        {Logs.list_sources(), searches}
       else
-        []
+        {[], []}
       end
 
     {:ok,
@@ -1034,21 +1037,26 @@ defmodule WhisperLogsWeb.LogsLive do
   @impl true
   def handle_params(params, _uri, socket) do
     filters = params_to_filters(params)
-    logs = fetch_logs(filters)
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
 
-    {:noreply,
-     socket
-     |> assign(:filters, filters)
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
-     |> assign(:has_newer?, false)
-     |> assign(:at_bottom?, true)
-     |> assign(:far_from_bottom?, false)
-     |> assign(:log_buffer, [])
-     |> stream(:logs, logs, reset: true)}
+    if connected?(socket) do
+      logs = fetch_logs(filters)
+      {cursor_top, cursor_bottom} = extract_cursors(logs)
+      has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
+
+      {:noreply,
+       socket
+       |> assign(:filters, filters)
+       |> assign(:cursor_top, cursor_top)
+       |> assign(:cursor_bottom, cursor_bottom)
+       |> assign(:has_older?, has_older?)
+       |> assign(:has_newer?, false)
+       |> assign(:at_bottom?, true)
+       |> assign(:far_from_bottom?, false)
+       |> assign(:log_buffer, [])
+       |> stream(:logs, logs, reset: true)}
+    else
+      {:noreply, assign(socket, :filters, filters)}
+    end
   end
 
   @impl true
