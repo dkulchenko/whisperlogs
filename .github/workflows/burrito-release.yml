@@ -48,6 +48,16 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends xz-utils p7zip-full
 
+      - name: Cache Elixir deps and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: burrito-${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            burrito-${{ runner.os }}-mix-
+
       - name: Install Elixir dependencies
         run: |
           mix local.hex --force
