@@ -11,3 +11,6 @@ Ecto.Adapters.SQL.Sandbox.mode(WhisperLogs.Repo, :manual)
 
 # Start the S3 client mock agent for export tests
 {:ok, _} = WhisperLogs.Exports.S3ClientMock.start_link()
+
+# Start the Slack webhook mock agent for notification tests
+{:ok, _} = WhisperLogs.Alerts.SlackWebhookClientMock.start_link()

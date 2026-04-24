@@ -400,6 +400,22 @@ defmodule WhisperLogs.AlertsTest do
       assert channel.config["user_key"] == "abc123"
     end
 
+    test "creates slack channel with valid webhook config" do
+      user = user_fixture()
+
+      {:ok, channel} =
+        Alerts.create_notification_channel(user, %{
+          name: "My Slack",
+          channel_type: "slack",
+          config: %{
+            "webhook_url" => "https://hooks.slack.com/services/T000/B000/secret"
+          }
+        })
+
+      assert channel.channel_type == "slack"
+      assert channel.config["webhook_url"] == "https://hooks.slack.com/services/T000/B000/secret"
+    end
+
     test "validates email format" do
       user = user_fixture()
 
@@ -437,6 +453,39 @@ defmodule WhisperLogs.AlertsTest do
         })
 
       assert errors_on(changeset) |> Map.has_key?(:config)
+    end
+
+    test "validates slack requires webhook_url" do
+      user = user_fixture()
+
+      {:error, changeset} =
+        Alerts.create_notification_channel(user, %{
+          name: "Bad Slack",
+          channel_type: "slack",
+          config: %{}
+        })
+
+      assert errors_on(changeset) |> Map.has_key?(:config)
+    end
+
+    test "validates slack webhook_url must be a Slack HTTPS webhook URL" do
+      user = user_fixture()
+
+      for url <- [
+            "http://hooks.slack.com/services/T000/B000/secret",
+            "https://example.com/services/T000/B000/secret",
+            "https://hooks.slack.com/not-services/T000/B000/secret",
+            "https://hooks.slack.com/services/"
+          ] do
+        {:error, changeset} =
+          Alerts.create_notification_channel(user, %{
+            name: "Bad Slack",
+            channel_type: "slack",
+            config: %{"webhook_url" => url}
+          })
+
+        assert errors_on(changeset) |> Map.has_key?(:config)
+      end
     end
   end
 

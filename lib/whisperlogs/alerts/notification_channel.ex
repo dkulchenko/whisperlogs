@@ -1,11 +1,11 @@
 defmodule WhisperLogs.Alerts.NotificationChannel do
   @moduledoc """
-  Schema for notification channels (email, pushover).
+  Schema for notification channels (email, pushover, slack).
   """
   use Ecto.Schema
   import Ecto.Changeset
 
-  @channel_types ~w(email pushover)
+  @channel_types ~w(email pushover slack)
 
   schema "notification_channels" do
     field :channel_type, :string
@@ -55,6 +55,13 @@ defmodule WhisperLogs.Alerts.NotificationChannel do
             changeset
         end
 
+      "slack" ->
+        if valid_slack_webhook_url?(config["webhook_url"]) do
+          changeset
+        else
+          add_error(changeset, :config, "must include a valid Slack webhook URL")
+        end
+
       _ ->
         changeset
     end
@@ -66,4 +73,16 @@ defmodule WhisperLogs.Alerts.NotificationChannel do
     do: String.match?(email, ~r/^[^@,;\s]+@[^@,;\s]+$/)
 
   defp valid_email?(_), do: false
+
+  defp valid_slack_webhook_url?(url) when is_binary(url) do
+    uri = URI.parse(url)
+
+    uri.scheme == "https" and
+      uri.host in ["hooks.slack.com", "hooks.slack-gov.com"] and
+      is_binary(uri.path) and
+      String.starts_with?(uri.path, "/services/") and
+      length(String.split(String.trim_leading(uri.path, "/services/"), "/", trim: true)) >= 3
+  end
+
+  defp valid_slack_webhook_url?(_), do: false
 end

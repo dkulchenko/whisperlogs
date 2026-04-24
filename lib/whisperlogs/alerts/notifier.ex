@@ -4,7 +4,7 @@ defmodule WhisperLogs.Alerts.Notifier do
   """
 
   alias WhisperLogs.Alerts.Alert
-  alias WhisperLogs.Alerts.Notifier.{Email, Pushover}
+  alias WhisperLogs.Alerts.Notifier.{Email, Pushover, Slack}
 
   @doc """
   Sends notifications for a triggered alert.
@@ -32,5 +32,9 @@ defmodule WhisperLogs.Alerts.Notifier do
 
   defp send_to_channel(%{channel_type: "pushover"} = channel, alert, trigger_type, trigger_data) do
     Pushover.send(channel, alert, trigger_type, trigger_data)
+  end
+
+  defp send_to_channel(%{channel_type: "slack"} = channel, alert, trigger_type, trigger_data) do
+    Slack.send(channel, alert, trigger_type, trigger_data)
   end
 end

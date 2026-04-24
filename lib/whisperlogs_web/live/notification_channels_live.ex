@@ -14,12 +14,14 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
      |> assign(:channels, channels)
      |> assign(:show_email_form, false)
      |> assign(:show_pushover_form, false)
+     |> assign(:show_slack_form, false)
      |> assign(:editing_channel, nil)
      |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
      |> assign(
        :pushover_form,
        to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
-     )}
+     )
+     |> assign(:slack_form, to_form(%{"name" => "", "webhook_url" => ""}))}
   end
 
   @impl true
@@ -31,12 +33,12 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
           <.header>
             Notification Channels
             <:subtitle>
-              Configure where alert notifications are sent. Create email or Pushover channels,
-              then attach them to alerts.
+              Configure where alert notifications are sent. Create email, Pushover, or Slack
+              channels, then attach them to alerts.
             </:subtitle>
           </.header>
 
-          <div class="mt-8 flex gap-3">
+          <div class="mt-8 flex flex-wrap gap-3">
             <button
               type="button"
               phx-click="toggle_email_form"
@@ -58,6 +60,17 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
               ]}
             >
               <.icon name="hero-device-phone-mobile" class="size-4" /> Add Pushover Channel
+            </button>
+            <button
+              type="button"
+              phx-click="toggle_slack_form"
+              class={[
+                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
+                "border border-accent-purple/30"
+              ]}
+            >
+              <.icon name="hero-chat-bubble-left-right" class="size-4" /> Add Slack Channel
             </button>
           </div>
 
@@ -182,6 +195,63 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
             </.form>
           </div>
 
+          <%!-- Slack Form --%>
+          <div
+            :if={@show_slack_form}
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+          >
+            <div class="flex items-center gap-2 mb-4">
+              <.icon name="hero-chat-bubble-left-right" class="size-5 text-accent-purple" />
+              <h3 class="text-lg font-semibold text-text-primary">
+                {if @editing_channel && @editing_channel.channel_type == "slack",
+                  do: "Edit Slack Channel",
+                  else: "New Slack Channel"}
+              </h3>
+            </div>
+            <.form
+              for={@slack_form}
+              id="slack-channel-form"
+              phx-submit="save_slack"
+              class="space-y-4"
+            >
+              <.input
+                field={@slack_form[:name]}
+                type="text"
+                label="Name"
+                placeholder="e.g., Engineering Slack"
+              />
+              <.input
+                field={@slack_form[:webhook_url]}
+                type="password"
+                label="Webhook URL"
+                placeholder={
+                  if @editing_channel && @editing_channel.channel_type == "slack",
+                    do: "Leave blank to keep existing webhook",
+                    else: "https://hooks.slack.com/services/..."
+                }
+                autocomplete="off"
+              />
+              <p class="text-sm text-text-tertiary">
+                Create an incoming webhook in Slack and paste its channel-specific URL here.
+              </p>
+              <div class="flex gap-3">
+                <.button
+                  variant="primary"
+                  phx-disable-with={if @editing_channel, do: "Saving...", else: "Creating..."}
+                >
+                  {if @editing_channel, do: "Save Changes", else: "Create Channel"}
+                </.button>
+                <button
+                  type="button"
+                  phx-click="toggle_slack_form"
+                  class="px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary rounded-lg transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </.form>
+          </div>
+
           <div class="mt-10">
             <h3 class="text-lg font-semibold text-text-primary mb-4">Your Channels</h3>
 
@@ -202,16 +272,11 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
                 <div class="flex items-center justify-between">
                   <div class="flex-1">
                     <div class="flex items-center gap-3">
-                      <%= if channel.channel_type == "email" do %>
-                        <.icon name="hero-envelope" class="size-4 text-text-tertiary" />
-                      <% else %>
-                        <.icon name="hero-device-phone-mobile" class="size-4 text-text-tertiary" />
-                      <% end %>
+                      <.icon name={channel_icon(channel)} class="size-4 text-text-tertiary" />
                       <span class="font-medium text-text-primary">{channel.name}</span>
                       <span class={[
                         "px-2 py-0.5 rounded text-xs font-medium",
-                        channel.channel_type == "email" && "bg-blue-500/10 text-blue-400",
-                        channel.channel_type == "pushover" && "bg-green-500/10 text-green-400"
+                        channel_type_badge_class(channel.channel_type)
                       ]}>
                         {String.upcase(channel.channel_type)}
                       </span>
@@ -223,11 +288,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
                       </span>
                     </div>
                     <div class="mt-1.5 text-sm text-text-tertiary">
-                      <%= if channel.channel_type == "email" do %>
-                        {channel.config["email"]}
-                      <% else %>
-                        Priority: {format_priority(channel.config["priority"])}
-                      <% end %>
+                      {channel_details(channel)}
                     </div>
                   </div>
                   <div class="flex items-center gap-2">
@@ -278,6 +339,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
      socket
      |> assign(:show_email_form, !socket.assigns.show_email_form)
      |> assign(:show_pushover_form, false)
+     |> assign(:show_slack_form, false)
      |> assign(:editing_channel, nil)
      |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))}
   end
@@ -287,11 +349,22 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
      socket
      |> assign(:show_pushover_form, !socket.assigns.show_pushover_form)
      |> assign(:show_email_form, false)
+     |> assign(:show_slack_form, false)
      |> assign(:editing_channel, nil)
      |> assign(
        :pushover_form,
        to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
      )}
+  end
+
+  def handle_event("toggle_slack_form", _, socket) do
+    {:noreply,
+     socket
+     |> assign(:show_slack_form, !socket.assigns.show_slack_form)
+     |> assign(:show_email_form, false)
+     |> assign(:show_pushover_form, false)
+     |> assign(:editing_channel, nil)
+     |> assign(:slack_form, to_form(%{"name" => "", "webhook_url" => ""}))}
   end
 
   def handle_event("edit_channel", %{"id" => id}, socket) do
@@ -312,6 +385,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
          |> assign(:editing_channel, channel)
          |> assign(:show_email_form, true)
          |> assign(:show_pushover_form, false)
+         |> assign(:show_slack_form, false)
          |> assign(:email_form, to_form(form_data))}
 
       %{channel_type: "pushover"} = channel ->
@@ -327,7 +401,22 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
          |> assign(:editing_channel, channel)
          |> assign(:show_pushover_form, true)
          |> assign(:show_email_form, false)
+         |> assign(:show_slack_form, false)
          |> assign(:pushover_form, to_form(form_data))}
+
+      %{channel_type: "slack"} = channel ->
+        form_data = %{
+          "name" => channel.name,
+          "webhook_url" => ""
+        }
+
+        {:noreply,
+         socket
+         |> assign(:editing_channel, channel)
+         |> assign(:show_slack_form, true)
+         |> assign(:show_email_form, false)
+         |> assign(:show_pushover_form, false)
+         |> assign(:slack_form, to_form(form_data))}
     end
   end
 
@@ -353,6 +442,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
            |> assign(:channels, channels)
            |> assign(:show_email_form, false)
            |> assign(:editing_channel, nil)
+           |> assign(:show_slack_form, false)
            |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
            |> put_flash(:info, "Email channel updated")}
 
@@ -375,6 +465,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
            socket
            |> assign(:channels, [channel | socket.assigns.channels])
            |> assign(:show_email_form, false)
+           |> assign(:show_slack_form, false)
            |> assign(:email_form, to_form(%{"name" => "", "email" => ""}))
            |> put_flash(:info, "Email channel created")}
 
@@ -413,6 +504,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
            |> assign(:channels, channels)
            |> assign(:show_pushover_form, false)
            |> assign(:editing_channel, nil)
+           |> assign(:show_slack_form, false)
            |> assign(
              :pushover_form,
              to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
@@ -442,11 +534,73 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
            socket
            |> assign(:channels, [channel | socket.assigns.channels])
            |> assign(:show_pushover_form, false)
+           |> assign(:show_slack_form, false)
            |> assign(
              :pushover_form,
              to_form(%{"name" => "", "user_key" => "", "app_token" => "", "priority" => "0"})
            )
            |> put_flash(:info, "Pushover channel created")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
+    end
+  end
+
+  def handle_event("save_slack", params, socket) do
+    user = socket.assigns.current_scope.user
+    webhook_url = String.trim(params["webhook_url"] || "")
+
+    if socket.assigns.editing_channel do
+      config =
+        if webhook_url == "" do
+          socket.assigns.editing_channel.config
+        else
+          %{"webhook_url" => webhook_url}
+        end
+
+      attrs = %{
+        name: params["name"],
+        config: config
+      }
+
+      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+        {:ok, updated} ->
+          channels =
+            Enum.map(socket.assigns.channels, fn c ->
+              if c.id == updated.id, do: updated, else: c
+            end)
+
+          {:noreply,
+           socket
+           |> assign(:channels, channels)
+           |> assign(:show_slack_form, false)
+           |> assign(:editing_channel, nil)
+           |> assign(:slack_form, to_form(%{"name" => "", "webhook_url" => ""}))
+           |> put_flash(:info, "Slack channel updated")}
+
+        {:error, changeset} ->
+          {:noreply,
+           socket
+           |> put_flash(:error, format_errors(changeset))}
+      end
+    else
+      attrs = %{
+        channel_type: "slack",
+        name: params["name"],
+        config: %{"webhook_url" => webhook_url}
+      }
+
+      case Alerts.create_notification_channel(user, attrs) do
+        {:ok, channel} ->
+          {:noreply,
+           socket
+           |> assign(:channels, [channel | socket.assigns.channels])
+           |> assign(:show_slack_form, false)
+           |> assign(:slack_form, to_form(%{"name" => "", "webhook_url" => ""}))
+           |> put_flash(:info, "Slack channel created")}
 
         {:error, changeset} ->
           {:noreply,
@@ -501,6 +655,43 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         end
     end
   end
+
+  defp channel_icon(%{channel_type: "email"}), do: "hero-envelope"
+  defp channel_icon(%{channel_type: "pushover"}), do: "hero-device-phone-mobile"
+  defp channel_icon(%{channel_type: "slack"}), do: "hero-chat-bubble-left-right"
+
+  defp channel_type_badge_class("email"), do: "bg-blue-500/10 text-blue-400"
+  defp channel_type_badge_class("pushover"), do: "bg-green-500/10 text-green-400"
+  defp channel_type_badge_class("slack"), do: "bg-amber-500/10 text-amber-400"
+
+  defp channel_details(%{channel_type: "email"} = channel), do: channel.config["email"]
+
+  defp channel_details(%{channel_type: "pushover"} = channel) do
+    "Priority: #{format_priority(channel.config["priority"])}"
+  end
+
+  defp channel_details(%{channel_type: "slack"} = channel) do
+    redact_webhook_url(channel.config["webhook_url"])
+  end
+
+  defp redact_webhook_url(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host, path: "/services/" <> path} when is_binary(host) ->
+        segments = String.split(path, "/", trim: true)
+        visible = segments |> List.first() |> redact_segment()
+
+        "#{host}/services/#{visible}/..."
+
+      _ ->
+        "Slack webhook configured"
+    end
+  end
+
+  defp redact_webhook_url(_), do: "Slack webhook configured"
+
+  defp redact_segment(nil), do: "..."
+  defp redact_segment(segment) when byte_size(segment) <= 4, do: "..."
+  defp redact_segment(segment), do: String.slice(segment, 0, 4) <> "..."
 
   defp format_priority(-2), do: "Lowest"
   defp format_priority(-1), do: "Low"

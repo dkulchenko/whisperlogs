@@ -59,6 +59,21 @@ defmodule WhisperLogsWeb.NotificationChannelsLiveTest do
       assert html =~ "My Pushover"
       assert html =~ "PUSHOVER"
     end
+
+    test "displays existing slack channel with redacted webhook", %{conn: conn, user: user} do
+      _channel =
+        slack_channel_fixture(user,
+          name: "My Slack",
+          webhook_url: "https://hooks.slack.com/services/T000/B000/secret"
+        )
+
+      {:ok, _lv, html} = live(conn, ~p"/notification-channels")
+
+      assert html =~ "My Slack"
+      assert html =~ "SLACK"
+      assert html =~ "hooks.slack.com/services/.../..."
+      refute html =~ "secret"
+    end
   end
 
   describe "create channel" do
@@ -116,6 +131,34 @@ defmodule WhisperLogsWeb.NotificationChannelsLiveTest do
       assert html =~ "Test Pushover"
       assert html =~ "PUSHOVER"
     end
+
+    test "shows slack form when Add Slack is clicked", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/notification-channels")
+
+      html = render_click(lv, "toggle_slack_form")
+
+      assert html =~ "New Slack Channel"
+      assert html =~ "Webhook URL"
+    end
+
+    test "creates slack channel", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, ~p"/notification-channels")
+
+      render_click(lv, "toggle_slack_form")
+
+      html =
+        lv
+        |> form("#slack-channel-form", %{
+          "name" => "Test Slack",
+          "webhook_url" => "https://hooks.slack.com/services/T123/B456/secret"
+        })
+        |> render_submit()
+
+      assert html =~ "Test Slack"
+      assert html =~ "SLACK"
+      assert html =~ "hooks.slack.com/services/.../..."
+      refute html =~ "secret"
+    end
   end
 
   describe "channel actions" do
@@ -135,6 +178,32 @@ defmodule WhisperLogsWeb.NotificationChannelsLiveTest do
 
       # Channel name should be updated
       assert html =~ "New Name"
+    end
+
+    test "edits slack channel without exposing existing webhook", %{conn: conn, user: user} do
+      channel =
+        slack_channel_fixture(user,
+          name: "Old Slack",
+          webhook_url: "https://hooks.slack.com/services/T111/B222/secret"
+        )
+
+      {:ok, lv, html} = live(conn, ~p"/notification-channels")
+      refute html =~ "secret"
+
+      html = render_click(lv, "edit_channel", %{"id" => to_string(channel.id)})
+      assert html =~ "Edit Slack Channel"
+      assert html =~ "Leave blank to keep existing webhook"
+      refute html =~ "secret"
+
+      html =
+        lv
+        |> form("#slack-channel-form", %{
+          "name" => "New Slack"
+        })
+        |> render_submit()
+
+      assert html =~ "New Slack"
+      refute html =~ "secret"
     end
 
     test "deletes channel", %{conn: conn, user: user} do

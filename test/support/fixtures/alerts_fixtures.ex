@@ -62,6 +62,37 @@ defmodule WhisperLogs.AlertsFixtures do
   end
 
   @doc """
+  Creates a Slack notification channel.
+
+  ## Examples
+
+      slack_channel_fixture(user)
+      slack_channel_fixture(user, webhook_url: "https://hooks.slack.com/services/T/B/C")
+  """
+  def slack_channel_fixture(user \\ nil, attrs \\ []) do
+    user = user || user_fixture()
+    name = Keyword.get(attrs, :name, "Test Slack Channel")
+    enabled = Keyword.get(attrs, :enabled, true)
+
+    webhook_url =
+      Keyword.get(
+        attrs,
+        :webhook_url,
+        "https://hooks.slack.com/services/T#{System.unique_integer([:positive])}/B/C"
+      )
+
+    {:ok, channel} =
+      Alerts.create_notification_channel(user, %{
+        name: name,
+        channel_type: "slack",
+        enabled: enabled,
+        config: %{"webhook_url" => webhook_url}
+      })
+
+    channel
+  end
+
+  @doc """
   Creates a notification channel of any type.
 
   ## Examples
@@ -73,6 +104,7 @@ defmodule WhisperLogs.AlertsFixtures do
     case Keyword.get(attrs, :channel_type, "email") do
       "email" -> email_channel_fixture(user, attrs)
       "pushover" -> pushover_channel_fixture(user, attrs)
+      "slack" -> slack_channel_fixture(user, attrs)
     end
   end
 
