@@ -8,9 +8,9 @@ defmodule WhisperLogsWeb.SourcesLiveTest do
   alias WhisperLogs.Repo
 
   # In SQLite mode, a local@localhost user is expected to exist
-  setup do
+  setup %{conn: conn} do
     user = ensure_local_user()
-    {:ok, user: user}
+    {:ok, conn: log_in_user(conn, user), user: user}
   end
 
   defp ensure_local_user do

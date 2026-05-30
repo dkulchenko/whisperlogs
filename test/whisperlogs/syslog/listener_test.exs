@@ -4,15 +4,27 @@ defmodule WhisperLogs.Syslog.ListenerTest do
   alias WhisperLogs.Syslog.Listener
   alias WhisperLogs.Logs
 
-  # Use high ephemeral ports for test stability
-  @base_test_port 55000
-
   setup do
-    # Ensure we have a unique port for each test
-    # Use parentheses to ensure correct precedence
-    offset = rem(:erlang.unique_integer([:positive, :monotonic]), 1000)
-    port = @base_test_port + offset
-    {:ok, port: port}
+    {:ok, port: available_port()}
+  end
+
+  defp available_port(attempts \\ 100)
+  defp available_port(0), do: raise("could not find an available TCP/UDP port")
+
+  defp available_port(attempts) do
+    {:ok, tcp_socket} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, port} = :inet.port(tcp_socket)
+
+    case :gen_udp.open(port, [:binary]) do
+      {:ok, udp_socket} ->
+        :gen_udp.close(udp_socket)
+        :gen_tcp.close(tcp_socket)
+        port
+
+      {:error, _reason} ->
+        :gen_tcp.close(tcp_socket)
+        available_port(attempts - 1)
+    end
   end
 
   # Create a mock source struct for testing

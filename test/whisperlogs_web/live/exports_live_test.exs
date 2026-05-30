@@ -7,10 +7,10 @@ defmodule WhisperLogsWeb.ExportsLiveTest do
   alias WhisperLogs.Accounts.User
   alias WhisperLogs.Repo
 
-  setup do
+  setup %{conn: conn} do
     user = ensure_local_user()
     scope = WhisperLogs.Accounts.Scope.for_user(user)
-    {:ok, user: user, scope: scope}
+    {:ok, conn: log_in_user(conn, user), user: user, scope: scope}
   end
 
   defp ensure_local_user do

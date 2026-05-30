@@ -191,7 +191,7 @@ defmodule WhisperLogs.Alerts do
 
     AlertHistory
     |> where([h], h.alert_id == ^alert_id)
-    |> order_by([h], desc: h.triggered_at)
+    |> order_by([h], desc: h.triggered_at, desc: h.id)
     |> limit(^limit)
     |> Repo.all()
   end

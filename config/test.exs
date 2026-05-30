@@ -45,16 +45,26 @@ config :whisperlogs, WhisperLogs.Repo.SQLite,
   cache_size: -64000,
   temp_store: :memory
 
-# PostgreSQL config (used when DATABASE_URL is set)
+# PostgreSQL config (default test adapter; DATABASE_URL overrides host settings)
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
-config :whisperlogs, WhisperLogs.Repo.Postgres,
+postgres_config = [
   username: "postgres",
   password: "postgres",
   hostname: "localhost",
   database: "whisperlogs_test#{System.get_env("MIX_TEST_PARTITION")}",
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10
+]
+
+postgres_config =
+  if database_url = System.get_env("DATABASE_URL") do
+    Keyword.put(postgres_config, :url, database_url)
+  else
+    postgres_config
+  end
+
+config :whisperlogs, WhisperLogs.Repo.Postgres, postgres_config
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.

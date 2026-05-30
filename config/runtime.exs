@@ -7,9 +7,24 @@ import Config
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
 
-# Determine database adapter at runtime based on DATABASE_URL
-# This must be set before any Repo config and before the app starts
-adapter = if System.get_env("DATABASE_URL"), do: :postgres, else: :sqlite
+# Determine database adapter at runtime.
+# Tests default to PostgreSQL so the authenticated/multi-user path is covered
+# by normal `mix test`; set WHISPERLOGS_TEST_ADAPTER=sqlite for SQLite-only runs.
+adapter =
+  cond do
+    config_env() == :test and System.get_env("WHISPERLOGS_TEST_ADAPTER") == "sqlite" ->
+      :sqlite
+
+    config_env() == :test ->
+      :postgres
+
+    System.get_env("DATABASE_URL") ->
+      :postgres
+
+    true ->
+      :sqlite
+  end
+
 config :whisperlogs, :db_adapter, adapter
 
 # Always start the server in production mode (for releases/Burrito builds)

@@ -221,12 +221,36 @@ export SECRET_KEY_BASE="$(openssl rand -base64 48)"
 
 Then open the browser and register the first user account.
 
+### Migrating SQLite data to PostgreSQL
+
+Stop WhisperLogs before migrating so the SQLite database cannot change during the copy. The
+PostgreSQL target should be empty; the migration task runs migrations, copies all application
+tables, verifies row counts, and sets login credentials for the migrated admin user.
+
+```bash
+export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
+export SQLITE_DATABASE_PATH="/var/lib/whisperlogs/db.sqlite"
+export SECRET_KEY_BASE="$(openssl rand -base64 48)"
+export ADMIN_EMAIL="admin@example.com"
+export ADMIN_PASSWORD="replace-with-a-long-password"
+./whisperlogs_linux eval "WhisperLogs.Release.migrate_sqlite_to_postgres()"
+```
+
+Use `MIGRATION_BATCH_SIZE` to tune copy batches. Set
+`MIGRATION_ALLOW_NON_EMPTY_TARGET=true` only if you intentionally want to copy into a target
+that already has application rows.
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | - | PostgreSQL connection URL (enables PostgreSQL mode) |
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
+| `SQLITE_DATABASE_PATH` | `DATABASE_PATH` | Source SQLite database path for SQLite-to-PostgreSQL migration |
+| `ADMIN_EMAIL` | - | Admin login email to set during SQLite-to-PostgreSQL migration |
+| `ADMIN_PASSWORD` | - | Admin login password to set during SQLite-to-PostgreSQL migration |
+| `MIGRATION_BATCH_SIZE` | `1000` | Rows per batch during SQLite-to-PostgreSQL migration |
+| `MIGRATION_ALLOW_NON_EMPTY_TARGET` | `false` | Allow migration into a PostgreSQL target with existing application rows |
 | `SECRET_KEY_BASE` | - | Required for PostgreSQL mode, recommended for stable sessions in containerized SQLite deployments |
 | `PHX_HOST` | `localhost` | Server hostname |
 | `PORT` | `4050` | Web server port |

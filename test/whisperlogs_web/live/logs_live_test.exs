@@ -9,9 +9,10 @@ defmodule WhisperLogsWeb.LogsLiveTest do
 
   # In SQLite mode, a local@localhost user is expected to exist
   # This setup ensures it exists for all tests
-  setup do
-    ensure_local_user()
-    :ok
+  setup %{conn: conn} do
+    user = ensure_local_user()
+    scope = WhisperLogs.Accounts.Scope.for_user(user)
+    {:ok, conn: log_in_user(conn, user), user: user, scope: scope}
   end
 
   defp ensure_local_user do

@@ -1,4 +1,5 @@
-# Exclude :postgres_only tests when running SQLite
+# `mix test` defaults to PostgreSQL so postgres_only coverage runs normally.
+# Set WHISPERLOGS_TEST_ADAPTER=sqlite for explicit SQLite adapter runs.
 exclude =
   if WhisperLogs.DbAdapter.sqlite?() do
     [:postgres_only]

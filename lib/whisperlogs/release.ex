@@ -29,6 +29,16 @@ defmodule WhisperLogs.Release do
   end
 
   @doc """
+  Migrates all data from a SQLite database into PostgreSQL.
+
+  This is an offline production migration task. The application should be
+  stopped before running it so the SQLite source cannot change during copy.
+  """
+  def migrate_sqlite_to_postgres do
+    WhisperLogs.SQLiteToPostgresMigrator.migrate()
+  end
+
+  @doc """
   Creates the database and runs all pending migrations.
   Used for SQLite auto-setup on first run.
   """

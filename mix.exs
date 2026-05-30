@@ -28,7 +28,7 @@ defmodule WhisperLogs.MixProject do
 
   def cli do
     [
-      preferred_envs: [precommit: :test]
+      preferred_envs: [precommit: :test, "test.adapters": :test]
     ]
   end
 
@@ -110,6 +110,7 @@ defmodule WhisperLogs.MixProject do
       "ecto.setup": ["ecto.create", "ecto.migrate", "run priv/repo/seeds.exs"],
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
+      "test.adapters": [&test_adapters/1],
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["compile", "tailwind whisperlogs", "esbuild whisperlogs"],
       "assets.deploy": [
@@ -119,7 +120,37 @@ defmodule WhisperLogs.MixProject do
         "phx.digest"
       ],
       release: ["assets.deploy", "release", "phx.digest.clean --all"],
-      precommit: ["compile --warnings-as-errors", "deps.unlock --unused", "format", "test"]
+      precommit: [
+        "compile --warnings-as-errors",
+        "deps.unlock --unused",
+        "format",
+        "test.adapters"
+      ]
     ]
+  end
+
+  defp test_adapters(args) do
+    run_adapter_tests!("postgres", args)
+    run_adapter_tests!("sqlite", args)
+  end
+
+  defp run_adapter_tests!(adapter, args) do
+    Mix.shell().info([:bright, "\nRunning #{adapter} test suite\n"])
+
+    env =
+      [{"MIX_ENV", "test"}] ++
+        if adapter == "sqlite" do
+          [{"WHISPERLOGS_TEST_ADAPTER", "sqlite"}]
+        else
+          [{"WHISPERLOGS_TEST_ADAPTER", "postgres"}]
+        end
+
+    case System.cmd("mix", ["test" | args], env: env, into: IO.stream(:stdio, :line)) do
+      {_output, 0} ->
+        :ok
+
+      {_output, status} ->
+        Mix.raise("#{adapter} test suite failed with status #{status}")
+    end
   end
 end

@@ -7,9 +7,9 @@ defmodule WhisperLogsWeb.NotificationChannelsLiveTest do
   alias WhisperLogs.Accounts.User
   alias WhisperLogs.Repo
 
-  setup do
+  setup %{conn: conn} do
     user = ensure_local_user()
-    {:ok, user: user}
+    {:ok, conn: log_in_user(conn, user), user: user}
   end
 
   defp ensure_local_user do
