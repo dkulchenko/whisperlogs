@@ -286,8 +286,7 @@ defmodule WhisperLogsWeb.ExportsLive do
                       :if={@testing_connection == dest.id}
                       class="mt-2 text-sm text-text-tertiary flex items-center gap-1.5"
                     >
-                      <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin">
-                      </span>
+                      <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin"></span>
                       Testing connection...
                     </div>
                     <div

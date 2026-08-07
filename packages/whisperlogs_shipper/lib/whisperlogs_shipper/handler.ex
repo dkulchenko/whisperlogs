@@ -75,7 +75,10 @@ defmodule WhisperLogs.Shipper.Handler do
   defp safe_value(value) when is_reference(value), do: inspect(value)
   defp safe_value(value) when is_function(value), do: inspect(value)
   defp safe_value(value) when is_port(value), do: inspect(value)
-  defp safe_value(value) when is_map(value), do: Map.new(value, fn {k, v} -> {k, safe_value(v)} end)
+
+  defp safe_value(value) when is_map(value),
+    do: Map.new(value, fn {k, v} -> {k, safe_value(v)} end)
+
   defp safe_value(value) when is_list(value), do: Enum.map(value, &safe_value/1)
   defp safe_value(value), do: value
 end

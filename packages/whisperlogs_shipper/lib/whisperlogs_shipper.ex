@@ -151,7 +151,9 @@ defmodule WhisperLogs.Shipper do
 
         {:ok, %{status: status}} ->
           # Use IO.warn to bypass Logger and avoid infinite loop
-          IO.warn("[WhisperLogs.Shipper] HTTP #{status} shipping #{log_count} logs to #{endpoint}")
+          IO.warn(
+            "[WhisperLogs.Shipper] HTTP #{status} shipping #{log_count} logs to #{endpoint}"
+          )
 
         {:error, exception} ->
           IO.warn(

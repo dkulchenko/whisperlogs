@@ -1437,8 +1437,8 @@ defmodule WhisperLogsWeb.LogsLive do
         {:noreply, socket |> put_flash(:info, "No logs found around that time")}
       else
         {cursor_top, cursor_bottom} = extract_cursors(logs)
-        has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, [])
-        has_newer? = cursor_bottom != nil and Logs.has_logs_after?(cursor_bottom, [])
+        has_older? = Logs.has_logs_before?(cursor_top, [])
+        has_newer? = Logs.has_logs_after?(cursor_bottom, [])
 
         # Find the first log at or after the target time
         target_log =

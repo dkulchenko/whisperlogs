@@ -5,7 +5,7 @@ defmodule WhisperLogs.MixProject do
     [
       app: :whisperlogs,
       version: "0.4.0",
-      elixir: "~> 1.15",
+      elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
@@ -66,18 +66,19 @@ defmodule WhisperLogs.MixProject do
   defp deps do
     [
       {:bcrypt_elixir, "~> 3.0"},
-      {:phoenix, "~> 1.8.3"},
+      {:phoenix, "~> 1.8.9"},
       {:phoenix_ecto, "~> 4.5"},
-      {:ecto_sql, "~> 3.13"},
-      {:postgrex, ">= 0.0.0"},
-      {:ecto_sqlite3, "~> 0.17"},
+      {:ecto_sql, "~> 3.14"},
+      # Postgrex 0.22.4 is under the seven-day dependency quarantine.
+      {:postgrex, "~> 0.22.3 and < 0.22.4"},
+      {:ecto_sqlite3, "~> 0.24.1"},
       {:phoenix_html, "~> 4.1"},
-      {:phoenix_live_reload, "~> 1.2", only: :dev},
-      {:phoenix_live_view, "~> 1.1.0"},
-      {:lazy_html, ">= 0.1.0", only: :test},
+      {:phoenix_live_reload, "~> 1.7", only: :dev},
+      {:phoenix_live_view, "~> 1.2.8"},
+      {:lazy_html, "~> 0.1.12", only: :test},
       {:phoenix_live_dashboard, "~> 0.8.3"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
-      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.5.1", runtime: Mix.env() == :dev},
       {:heroicons,
        github: "tailwindlabs/heroicons",
        tag: "v2.2.0",
@@ -85,16 +86,16 @@ defmodule WhisperLogs.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:swoosh, "~> 1.16"},
-      {:req, "~> 0.5"},
+      {:swoosh, "~> 1.27"},
+      {:req, "~> 0.7.2"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
-      {:jason, "~> 1.2"},
+      {:jason, "~> 1.4.5"},
       {:dns_cluster, "~> 0.2.0"},
-      {:bandit, "~> 1.5"},
-      {:tz, "~> 0.28"},
+      {:bandit, "~> 1.12.4"},
+      {:tz, "~> 0.28.2"},
       {:date_time_parser, "~> 1.2"},
-      {:burrito, "~> 1.5"}
+      {:burrito, "~> 1.6"}
     ]
   end
 

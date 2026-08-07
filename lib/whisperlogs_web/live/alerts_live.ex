@@ -123,8 +123,7 @@ defmodule WhisperLogsWeb.AlertsLive do
                 <div class="mt-2 flex items-center gap-4 text-sm">
                   <%= if @counting do %>
                     <span class="text-text-tertiary flex items-center gap-1.5">
-                      <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin">
-                      </span>
+                      <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin"></span>
                       Counting matches...
                     </span>
                   <% else %>
