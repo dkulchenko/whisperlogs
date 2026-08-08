@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.5.1 - 2026-08-07
+
+- Fix the production container build by staging the SQLean configuration,
+  checksum manifest, and native libraries before production configuration is
+  evaluated during dependency compilation.
+- Supersede v0.5.0 for container deployments; its image workflow failed before
+  publishing an image. This patch otherwise contains the same application and
+  security changes documented below.
+
 ## v0.5.0 - 2026-08-07
 
 This release hardens WhisperLogs across authentication, ownership, ingestion,
