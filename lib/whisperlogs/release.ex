@@ -10,11 +10,6 @@ defmodule WhisperLogs.Release do
       ./whisperlogs eval "WhisperLogs.Release.migrate()"
   """
 
-  import Ecto.Query
-
-  alias WhisperLogs.Accounts.User
-  alias WhisperLogs.Repo
-
   @app :whisperlogs
 
   @doc """
@@ -60,38 +55,6 @@ defmodule WhisperLogs.Release do
 
       # Run pending migrations
       {:ok, _, _} = Ecto.Migrator.with_repo(repo, &Ecto.Migrator.run(&1, :up, all: true))
-    end
-
-    # For SQLite mode, ensure the default local user exists
-    if WhisperLogs.DbAdapter.sqlite?() do
-      {:ok, _, _} =
-        Ecto.Migrator.with_repo(Repo, fn repo ->
-          ensure_default_user(repo)
-        end)
-    end
-  end
-
-  @doc """
-  Ensures a default local user exists for SQLite single-user mode.
-  Returns the user.
-  """
-  def ensure_default_user(repo \\ Repo) do
-    case repo.one(from u in User, where: u.email == "local@localhost", limit: 1) do
-      nil ->
-        now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-        %User{}
-        |> Ecto.Changeset.change(%{
-          email: "local@localhost",
-          is_admin: true,
-          confirmed_at: now,
-          inserted_at: now,
-          updated_at: now
-        })
-        |> repo.insert!()
-
-      user ->
-        user
     end
   end
 

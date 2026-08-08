@@ -1,11 +1,18 @@
 defmodule WhisperLogsWeb.UserLive.RegistrationTest do
-  use WhisperLogsWeb.ConnCase, async: true
+  use WhisperLogsWeb.ConnCase, async: false
 
   # Multi-user auth tests only apply to PostgreSQL mode
   @moduletag :postgres_only
 
   import Phoenix.LiveViewTest
   import WhisperLogs.AccountsFixtures
+
+  setup do
+    original = Application.get_env(:whisperlogs, :registration)
+    Application.put_env(:whisperlogs, :registration, allow_public: true)
+    on_exit(fn -> Application.put_env(:whisperlogs, :registration, original) end)
+    :ok
+  end
 
   describe "Registration page" do
     test "renders registration page with password field", %{conn: conn} do
@@ -41,8 +48,7 @@ defmodule WhisperLogsWeb.UserLive.RegistrationTest do
     end
 
     test "redirects to login when registration is closed", %{conn: conn} do
-      # Create a user first to close registration
-      user_fixture()
+      Application.put_env(:whisperlogs, :registration, allow_public: false)
 
       result =
         conn
@@ -72,11 +78,9 @@ defmodule WhisperLogsWeb.UserLive.RegistrationTest do
       assert Phoenix.Flash.get(conn.assigns.flash, :info) =~ "Account created successfully"
     end
 
-    test "redirects when registration is closed due to existing user", %{conn: conn} do
-      # Create a user first - this closes registration
-      user_fixture(%{email: "test@email.com"})
+    test "redirects when registration is explicitly closed", %{conn: conn} do
+      Application.put_env(:whisperlogs, :registration, allow_public: false)
 
-      # Registration is closed because a user exists
       result =
         conn
         |> live(~p"/users/register")

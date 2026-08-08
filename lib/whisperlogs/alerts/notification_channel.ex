@@ -12,8 +12,6 @@ defmodule WhisperLogs.Alerts.NotificationChannel do
     field :name, :string
     field :enabled, :boolean, default: true
     field :config, :map, default: %{}
-    field :verified_at, :utc_datetime
-
     belongs_to :user, WhisperLogs.Accounts.User
 
     timestamps(type: :utc_datetime)

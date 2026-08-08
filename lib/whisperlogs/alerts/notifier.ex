@@ -11,8 +11,7 @@ defmodule WhisperLogs.Alerts.Notifier do
   Returns a list of notification results for history tracking.
   """
   def send_alert(%Alert{} = alert, trigger_type, trigger_data) do
-    alert.notification_channels
-    |> Enum.filter(& &1.enabled)
+    WhisperLogs.Alerts.notification_channels_for_delivery(alert)
     |> Enum.map(fn channel ->
       result = send_to_channel(channel, alert, trigger_type, trigger_data)
 

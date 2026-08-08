@@ -5,8 +5,7 @@ defmodule WhisperLogsWeb.SourcesLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    user = socket.assigns.current_scope.user
-    sources = Accounts.list_sources(user)
+    sources = Accounts.list_sources(socket.assigns.current_scope)
     next_port = Accounts.next_available_syslog_port()
 
     {:ok,
@@ -23,7 +22,10 @@ defmodule WhisperLogsWeb.SourcesLive do
          "source" => "",
          "port" => to_string(next_port),
          "transport" => "udp",
-         "auto_register_hosts" => "true"
+         "admission_mode" => "allowlist",
+         "allowed_hosts" => "",
+         "tls_framing" => "octet_counted",
+         "tls_client_identities" => ""
        })
      )}
   end
@@ -143,15 +145,47 @@ defmodule WhisperLogsWeb.SourcesLive do
                     field={@syslog_form[:transport]}
                     type="select"
                     label="Transport"
-                    options={[{"UDP", "udp"}, {"TCP", "tcp"}, {"Both", "both"}]}
+                    options={[
+                      {"UDP", "udp"},
+                      {"TCP", "tcp"},
+                      {"UDP + TCP", "both"},
+                      {"TLS with client certificate", "tls"}
+                    ]}
                     id="syslog-transport"
                   />
                 </div>
                 <.input
-                  field={@syslog_form[:auto_register_hosts]}
-                  type="checkbox"
-                  label="Accept from any host"
-                  id="syslog-auto-register"
+                  field={@syslog_form[:admission_mode]}
+                  type="select"
+                  label="Network admission"
+                  options={[
+                    {"Allowlisted IPs/CIDRs only", "allowlist"},
+                    {"Any reachable host", "any"}
+                  ]}
+                  id="syslog-admission-mode"
+                />
+                <p class="text-sm text-amber-300">
+                  “Any reachable host” trusts every sender that can reach this port. UDP and
+                  plaintext TCP do not authenticate or encrypt senders.
+                </p>
+                <.input
+                  field={@syslog_form[:allowed_hosts]}
+                  type="textarea"
+                  label="Allowed IPs/CIDRs (one per line)"
+                  id="syslog-allowed-hosts"
+                />
+                <.input
+                  field={@syslog_form[:tls_framing]}
+                  type="select"
+                  label="TLS framing"
+                  options={[{"RFC 5425 octet counted", "octet_counted"}, {"Newline", "newline"}]}
+                  id="syslog-tls-framing"
+                />
+                <.input
+                  field={@syslog_form[:tls_client_identities]}
+                  type="textarea"
+                  label="TLS client identities (typed SHA-256, one per line)"
+                  id="syslog-tls-identities"
                 />
                 <p :if={@editing_source == nil} class="text-sm text-text-tertiary">
                   Supports RFC 3164 and RFC 5424 formats
@@ -217,15 +251,11 @@ defmodule WhisperLogsWeb.SourcesLive do
                     </div>
                     <div class="mt-1.5 flex items-center gap-4 text-sm text-text-tertiary">
                       <span>Created {Calendar.strftime(source.inserted_at, "%b %d, %Y")}</span>
-                      <%= if source.last_used_at do %>
-                        <span>Last used {Calendar.strftime(source.last_used_at, "%b %d, %Y")}</span>
-                      <% else %>
-                        <span class="text-text-tertiary/60">Never used</span>
-                      <% end %>
                       <%= if source.type == "syslog" do %>
                         <span class="font-mono text-accent-purple">
                           :{source.port} ({source.transport})
                         </span>
+                        <span>{syslog_status(source)}</span>
                       <% end %>
                     </div>
                   </div>
@@ -248,6 +278,15 @@ defmodule WhisperLogsWeb.SourcesLive do
                         {if @revealed_key_id == source.id, do: "Hide", else: "Reveal Key"}
                       </button>
                     <% end %>
+                    <button
+                      :if={source.type == "syslog"}
+                      type="button"
+                      phx-click={if(source.enabled, do: "disable", else: "enable")}
+                      phx-value-id={source.id}
+                      class="px-3 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface rounded-lg transition-colors"
+                    >
+                      {if source.enabled, do: "Disable", else: "Enable"}
+                    </button>
                     <button
                       type="button"
                       phx-click="revoke"
@@ -289,12 +328,15 @@ defmodule WhisperLogsWeb.SourcesLive do
 
   @impl true
   def handle_event("save_http", params, socket) do
-    user = socket.assigns.current_scope.user
     name = params["name"]
 
     if socket.assigns.editing_source && socket.assigns.editing_source.type == "http" do
       # Update mode
-      case Accounts.update_http_source(socket.assigns.editing_source, %{name: name}) do
+      case Accounts.update_http_source(
+             socket.assigns.current_scope,
+             socket.assigns.editing_source.id,
+             %{name: name}
+           ) do
         {:ok, updated_source} ->
           sources =
             Enum.map(socket.assigns.sources, fn s ->
@@ -318,7 +360,7 @@ defmodule WhisperLogsWeb.SourcesLive do
       # Create mode
       attrs = %{name: name, source: params["source"]}
 
-      case Accounts.create_http_source(user, attrs) do
+      case Accounts.create_http_source(socket.assigns.current_scope, attrs) do
         {:ok, new_source} ->
           {:noreply,
            socket
@@ -336,18 +378,23 @@ defmodule WhisperLogsWeb.SourcesLive do
   end
 
   def handle_event("save_syslog", params, socket) do
-    user = socket.assigns.current_scope.user
-
     if socket.assigns.editing_source && socket.assigns.editing_source.type == "syslog" do
       # Update mode
       attrs = %{
         name: params["name"],
         port: String.to_integer(params["port"]),
         transport: params["transport"],
-        auto_register_hosts: params["auto_register_hosts"] == "true"
+        admission_mode: params["admission_mode"],
+        allowed_hosts: parse_lines(params["allowed_hosts"]),
+        tls_framing: params["tls_framing"],
+        tls_client_identities: parse_lines(params["tls_client_identities"])
       }
 
-      case Accounts.update_syslog_source(socket.assigns.editing_source, attrs) do
+      case Accounts.update_syslog_source(
+             socket.assigns.current_scope,
+             socket.assigns.editing_source.id,
+             attrs
+           ) do
         {:ok, updated_source} ->
           sources =
             Enum.map(socket.assigns.sources, fn s ->
@@ -367,16 +414,29 @@ defmodule WhisperLogsWeb.SourcesLive do
                "source" => "",
                "port" => to_string(next_port),
                "transport" => "udp",
-               "auto_register_hosts" => "true"
+               "admission_mode" => "allowlist",
+               "allowed_hosts" => "",
+               "tls_framing" => "octet_counted",
+               "tls_client_identities" => ""
              })
            )
            |> put_flash(:info, "Source updated successfully")}
 
-        {:error, changeset} ->
+        {:error, {:listener_update_failed, updated_source, reason}} ->
+          {:noreply,
+           socket
+           |> assign(:sources, replace_source(socket.assigns.sources, updated_source))
+           |> assign(:editing_source, updated_source)
+           |> put_flash(:error, listener_error("saved, but its listener is stopped", reason))}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
           {:noreply,
            socket
            |> put_flash(:error, format_errors(changeset))
            |> assign(:syslog_form, to_form(changeset))}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, listener_error("could not be updated", reason))}
       end
     else
       # Create mode
@@ -385,10 +445,13 @@ defmodule WhisperLogsWeb.SourcesLive do
         source: params["source"],
         port: String.to_integer(params["port"]),
         transport: params["transport"],
-        auto_register_hosts: params["auto_register_hosts"] == "true"
+        admission_mode: params["admission_mode"],
+        allowed_hosts: parse_lines(params["allowed_hosts"]),
+        tls_framing: params["tls_framing"],
+        tls_client_identities: parse_lines(params["tls_client_identities"])
       }
 
-      case Accounts.create_syslog_source(user, attrs) do
+      case Accounts.create_syslog_source(socket.assigns.current_scope, attrs) do
         {:ok, new_source} ->
           next_port = Accounts.next_available_syslog_port()
 
@@ -402,16 +465,28 @@ defmodule WhisperLogsWeb.SourcesLive do
                "source" => "",
                "port" => to_string(next_port),
                "transport" => "udp",
-               "auto_register_hosts" => "true"
+               "admission_mode" => "allowlist",
+               "allowed_hosts" => "",
+               "tls_framing" => "octet_counted",
+               "tls_client_identities" => ""
              })
            )
            |> put_flash(:info, "Syslog source created. Listening on port #{new_source.port}.")}
 
-        {:error, changeset} ->
+        {:error, {:listener_start_failed, new_source, reason}} ->
+          {:noreply,
+           socket
+           |> assign(:sources, [new_source | socket.assigns.sources])
+           |> put_flash(:error, listener_error("was saved, but its listener is stopped", reason))}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
           {:noreply,
            socket
            |> put_flash(:error, format_errors(changeset))
            |> assign(:syslog_form, to_form(changeset))}
+
+        {:error, reason} ->
+          {:noreply, put_flash(socket, :error, listener_error("could not be created", reason))}
       end
     end
   end
@@ -422,9 +497,7 @@ defmodule WhisperLogsWeb.SourcesLive do
   end
 
   def handle_event("edit_source", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
-
-    case Accounts.get_source(user, id) do
+    case Accounts.get_source(socket.assigns.current_scope, id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Source not found")}
 
@@ -445,7 +518,10 @@ defmodule WhisperLogsWeb.SourcesLive do
           "source" => source.source,
           "port" => to_string(source.port),
           "transport" => source.transport,
-          "auto_register_hosts" => to_string(source.auto_register_hosts)
+          "admission_mode" => source.admission_mode,
+          "allowed_hosts" => Enum.join(source.allowed_hosts, "\n"),
+          "tls_framing" => source.tls_framing || "octet_counted",
+          "tls_client_identities" => Enum.join(source.tls_client_identities, "\n")
         }
 
         {:noreply,
@@ -469,20 +545,21 @@ defmodule WhisperLogsWeb.SourcesLive do
          "source" => "",
          "port" => to_string(next_port),
          "transport" => "udp",
-         "auto_register_hosts" => "true"
+         "admission_mode" => "allowlist",
+         "allowed_hosts" => "",
+         "tls_framing" => "octet_counted",
+         "tls_client_identities" => ""
        })
      )}
   end
 
   def handle_event("revoke", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
-
-    case Accounts.get_source(user, id) do
+    case Accounts.get_source(socket.assigns.current_scope, id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Source not found")}
 
       source ->
-        case Accounts.revoke_source(source) do
+        case Accounts.revoke_source(socket.assigns.current_scope, source.id) do
           {:ok, _} ->
             sources = Enum.reject(socket.assigns.sources, &(&1.id == source.id))
 
@@ -495,6 +572,72 @@ defmodule WhisperLogsWeb.SourcesLive do
             {:noreply, put_flash(socket, :error, "Failed to revoke source")}
         end
     end
+  end
+
+  def handle_event("enable", %{"id" => id}, socket) do
+    set_syslog_enabled(socket, id, true)
+  end
+
+  def handle_event("disable", %{"id" => id}, socket) do
+    set_syslog_enabled(socket, id, false)
+  end
+
+  defp set_syslog_enabled(socket, id, enabled?) do
+    operation = if enabled?, do: :enable_syslog_source, else: :disable_syslog_source
+
+    case apply(Accounts, operation, [socket.assigns.current_scope, id]) do
+      {:ok, updated} ->
+        sources =
+          Enum.map(socket.assigns.sources, &if(&1.id == updated.id, do: updated, else: &1))
+
+        {:noreply, assign(socket, :sources, sources)}
+
+      {:error, reason} ->
+        socket =
+          case reason do
+            {:listener_start_failed, updated, listener_reason} ->
+              socket
+              |> assign(:sources, replace_source(socket.assigns.sources, updated))
+              |> put_flash(
+                :error,
+                listener_error("was enabled, but its listener is stopped", listener_reason)
+              )
+
+            %Ecto.Changeset{} = changeset ->
+              put_flash(socket, :error, format_errors(changeset))
+
+            other ->
+              put_flash(socket, :error, listener_error("could not be updated", other))
+          end
+
+        {:noreply, socket}
+    end
+  end
+
+  defp parse_lines(nil), do: []
+
+  defp parse_lines(value) do
+    value
+    |> String.split(~r/\R/, trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp replace_source(sources, updated) do
+    Enum.map(sources, &if(&1.id == updated.id, do: updated, else: &1))
+  end
+
+  defp syslog_status(%{enabled: false}), do: "Disabled"
+
+  defp syslog_status(source) do
+    if WhisperLogs.Syslog.Supervisor.listener_running?(source.id),
+      do: "Enabled",
+      else: "Enabled — listener stopped"
+  end
+
+  defp listener_error(prefix, reason) do
+    detail = inspect(reason, limit: 10, printable_limit: 256)
+    "Syslog source #{prefix}: #{detail}"
   end
 
   defp format_errors(changeset) do

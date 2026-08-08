@@ -40,7 +40,6 @@ defmodule WhisperLogs.Exports.ExportDestination do
       :name,
       :destination_type,
       :enabled,
-      :local_path,
       :s3_endpoint,
       :s3_bucket,
       :s3_region,
@@ -61,8 +60,6 @@ defmodule WhisperLogs.Exports.ExportDestination do
     case get_field(changeset, :destination_type) do
       "local" ->
         changeset
-        |> validate_required([:local_path])
-        |> validate_local_path()
 
       "s3" ->
         changeset
@@ -73,24 +70,19 @@ defmodule WhisperLogs.Exports.ExportDestination do
           :s3_access_key_id,
           :s3_secret_access_key
         ])
+        |> validate_change(:s3_endpoint, fn :s3_endpoint, endpoint ->
+          if endpoint in WhisperLogs.Config.s3_allowed_hosts(),
+            do: [],
+            else: [s3_endpoint: "is not allowlisted"]
+        end)
+        |> validate_change(:s3_bucket, fn :s3_bucket, bucket ->
+          if WhisperLogs.Exports.S3Client.valid_bucket?(bucket),
+            do: [],
+            else: [s3_bucket: "is not a virtual-host-safe DNS bucket"]
+        end)
 
       _ ->
         changeset
-    end
-  end
-
-  defp validate_local_path(changeset) do
-    case get_change(changeset, :local_path) do
-      nil ->
-        changeset
-
-      path ->
-        # Basic validation to prevent directory traversal
-        if String.contains?(path, "..") do
-          add_error(changeset, :local_path, "cannot contain '..'")
-        else
-          changeset
-        end
     end
   end
 

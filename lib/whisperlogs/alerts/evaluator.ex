@@ -1,30 +1,19 @@
 defmodule WhisperLogs.Alerts.Evaluator do
-  @moduledoc """
-  GenServer that periodically evaluates all enabled alerts.
-
-  Runs every 30 seconds, checking each alert against matching logs
-  and triggering notifications when conditions are met.
-  """
+  @moduledoc "Evaluates enabled alerts with bounded, owner-fair concurrency."
   use GenServer
 
   require Logger
-
-  alias WhisperLogs.Alerts
-  alias WhisperLogs.Alerts.Alert
-  alias WhisperLogs.Alerts.Notifier
-  alias WhisperLogs.Logs
-  alias WhisperLogs.Logs.Log
-  alias WhisperLogs.Logs.SearchParser
-  alias WhisperLogs.Repo
-
   import Ecto.Query, warn: false
 
-  @evaluation_interval :timer.seconds(30)
-  @query_timeout 10_000
+  alias WhisperLogs.Alerts
+  alias WhisperLogs.Alerts.{Alert, Notifier}
+  alias WhisperLogs.Logs
+  alias WhisperLogs.Logs.{Log, SearchParser}
+  alias WhisperLogs.Repo
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
+  @evaluation_interval :timer.seconds(30)
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @impl true
   def init(_opts) do
@@ -39,43 +28,58 @@ defmodule WhisperLogs.Alerts.Evaluator do
     {:noreply, state}
   end
 
-  # Ignore messages from Swoosh test adapter and other unexpected messages
-  @impl true
-  def handle_info(_msg, state) do
-    {:noreply, state}
-  end
+  def handle_info(_message, state), do: {:noreply, state}
 
-  defp schedule_evaluation do
-    Process.send_after(self(), :evaluate, @evaluation_interval)
-  end
+  defp schedule_evaluation, do: Process.send_after(self(), :evaluate, @evaluation_interval)
 
   defp evaluate_all_alerts do
+    limits = WhisperLogs.Config.alert_limits()
+    deadline = System.monotonic_time(:millisecond) + limits.cycle_timeout_ms
+    task_timeout = limits.query_timeout_ms + 1_000
+    launch_deadline = deadline - task_timeout
     alerts = Alerts.list_enabled_alerts()
 
-    Enum.each(alerts, fn alert ->
-      try do
-        evaluate_alert(alert)
-      rescue
-        error ->
-          Logger.error("Alert evaluation failed for #{alert.id}: #{Exception.message(error)}")
-      end
+    alerts
+    |> Stream.take_while(fn _alert -> System.monotonic_time(:millisecond) < launch_deadline end)
+    |> Task.async_stream(
+      &safely_evaluate/1,
+      max_concurrency: limits.max_concurrency,
+      # The query-level timeout must fire first. In SQLite, Exqlite's
+      # DBConnection timeout path calls sqlite3_cancel before the outer task is
+      # eligible for termination; PostgreSQL also gets time to cancel/rollback.
+      timeout: task_timeout,
+      on_timeout: :kill_task,
+      ordered: true
+    )
+    |> Enum.zip(alerts)
+    |> Enum.each(fn
+      {{:exit, :timeout}, alert} ->
+        mark_checked(alert)
+        Logger.warning("Alert evaluation timed out for alert #{alert.id}")
+
+      {_result, _alert} ->
+        :ok
     end)
   end
 
+  defp safely_evaluate(alert) do
+    evaluate_alert(alert)
+  rescue
+    error ->
+      mark_checked(alert)
+      Logger.warning("Alert evaluation failed for alert #{alert.id}: #{Exception.message(error)}")
+  catch
+    :exit, reason ->
+      mark_checked(alert)
+      Logger.warning("Alert evaluation stopped for alert #{alert.id}: #{inspect(reason)}")
+  end
+
   defp evaluate_alert(%Alert{alert_type: "any_match"} = alert) do
-    if in_cooldown?(alert) do
-      advance_last_seen_log_id(alert)
-    else
-      evaluate_any_match(alert)
-    end
+    if in_cooldown?(alert), do: advance_cursor(alert), else: evaluate_any_match(alert)
   end
 
   defp evaluate_alert(%Alert{alert_type: "velocity"} = alert) do
-    if in_cooldown?(alert) do
-      :skip
-    else
-      evaluate_velocity(alert)
-    end
+    if in_cooldown?(alert), do: mark_checked(alert), else: evaluate_velocity(alert)
   end
 
   defp in_cooldown?(%Alert{last_triggered_at: nil}), do: false
@@ -84,14 +88,13 @@ defmodule WhisperLogs.Alerts.Evaluator do
     DateTime.diff(DateTime.utc_now(), last, :second) < cooldown
   end
 
-  # ===== Any Match Evaluation =====
+  defp evaluate_any_match(alert) do
+    now = now()
+    cutoff = Logs.max_observed_cursor()
 
-  defp evaluate_any_match(%Alert{search_query: query, last_seen_log_id: last_id} = alert) do
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    case find_new_matching_log(query, last_id) do
+    case matching_log(alert, :first, cutoff) do
       nil ->
-        Alerts.update_alert_state(alert, %{last_checked_at: now})
+        advance_to_cursor(alert, cutoff, now)
 
       log ->
         trigger_data = %{
@@ -103,143 +106,131 @@ defmodule WhisperLogs.Alerts.Evaluator do
         }
 
         notifications = Notifier.send_alert(alert, "any_match", trigger_data)
+        _ = Alerts.create_alert_history(alert, "any_match", trigger_data, notifications)
 
-        case Alerts.create_alert_history(alert, "any_match", trigger_data, notifications) do
-          {:ok, _} ->
-            :ok
-
-          {:error, changeset} ->
-            Logger.error("Failed to create alert history: #{inspect(changeset.errors)}")
-        end
-
-        case Alerts.update_alert_state(alert, %{
-               last_seen_log_id: log.id,
-               last_triggered_at: now,
-               last_checked_at: now
-             }) do
-          {:ok, _} ->
-            :ok
-
-          {:error, changeset} ->
-            Logger.error("Failed to update alert state: #{inspect(changeset.errors)}")
-        end
+        Alerts.update_alert_state(alert, %{
+          last_seen_inserted_at: log.inserted_at,
+          last_seen_log_id: log.id,
+          last_triggered_at: now,
+          last_checked_at: now
+        })
     end
   end
 
-  defp find_new_matching_log(search_query, last_id) do
-    case SearchParser.parse(search_query) do
-      {:ok, []} ->
-        nil
+  defp advance_cursor(alert) do
+    advance_to_cursor(alert, Logs.max_observed_cursor(), now())
+  end
 
-      {:ok, tokens} ->
-        base_query =
-          Log
-          |> order_by([l], asc: l.id)
-          |> limit(1)
+  defp matching_log(%Alert{} = alert, direction, cutoff) do
+    with {:ok, [_ | _] = tokens} <- SearchParser.parse(alert.search_query) do
+      order = if direction == :first, do: :asc, else: :desc
 
-        query_with_filter =
-          if last_id do
-            where(base_query, [l], l.id > ^last_id)
-          else
-            base_query
-          end
-
-        query_with_filter
-        |> Logs.apply_search_tokens(tokens)
-        |> Repo.one(timeout: @query_timeout)
+      Log
+      |> after_cursor(alert.last_seen_inserted_at, alert.last_seen_log_id)
+      |> through_cursor(cutoff)
+      |> order_by([l], [{^order, l.inserted_at}, {^order, l.id}])
+      |> limit(1)
+      |> Logs.apply_search_tokens(tokens)
+      |> one_with_timeout()
+    else
+      _ -> nil
     end
   end
 
-  # During cooldown, advance last_seen_log_id so logs arriving in the
-  # cooldown window are silently skipped rather than queued for individual alerts.
-  defp advance_last_seen_log_id(%Alert{search_query: query, last_seen_log_id: last_id} = alert) do
-    case find_latest_matching_log(query, last_id) do
-      nil -> :skip
-      log -> Alerts.update_alert_state(alert, %{last_seen_log_id: log.id})
-    end
+  defp after_cursor(query, nil, _id), do: query
+
+  defp after_cursor(query, inserted_at, id) do
+    where(
+      query,
+      [l],
+      l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^(id || 0))
+    )
   end
 
-  defp find_latest_matching_log(search_query, last_id) do
-    case SearchParser.parse(search_query) do
-      {:ok, []} ->
-        nil
+  defp through_cursor(query, {nil, _id}), do: where(query, [l], false)
 
-      {:ok, tokens} ->
-        base_query =
-          Log
-          |> order_by([l], desc: l.id)
-          |> limit(1)
-
-        query_with_filter =
-          if last_id do
-            where(base_query, [l], l.id > ^last_id)
-          else
-            base_query
-          end
-
-        query_with_filter
-        |> Logs.apply_search_tokens(tokens)
-        |> Repo.one(timeout: @query_timeout)
-    end
+  defp through_cursor(query, {inserted_at, id}) do
+    where(
+      query,
+      [l],
+      l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id <= ^id)
+    )
   end
 
-  # ===== Velocity Evaluation =====
+  defp advance_to_cursor(alert, {nil, _id}, checked_at) do
+    Alerts.update_alert_state(alert, %{last_checked_at: checked_at})
+  end
 
-  defp evaluate_velocity(%Alert{} = alert) do
-    %{
-      search_query: query,
-      velocity_threshold: threshold,
-      velocity_window_seconds: window
-    } = alert
+  defp advance_to_cursor(alert, {inserted_at, id}, checked_at) do
+    Alerts.update_alert_state(alert, %{
+      last_seen_inserted_at: inserted_at,
+      last_seen_log_id: id,
+      last_checked_at: checked_at
+    })
+  end
 
-    count = count_matches_in_window(query, window)
+  defp evaluate_velocity(alert) do
+    count = count_matches_in_window(alert.search_query, alert.velocity_window_seconds)
+    now = now()
 
-    now = DateTime.utc_now() |> DateTime.truncate(:second)
-
-    if count >= threshold do
+    if count >= alert.velocity_threshold do
       trigger_data = %{
         "count" => count,
-        "threshold" => threshold,
-        "window_seconds" => window
+        "threshold" => alert.velocity_threshold,
+        "window_seconds" => alert.velocity_window_seconds
       }
 
       notifications = Notifier.send_alert(alert, "velocity", trigger_data)
-
-      case Alerts.create_alert_history(alert, "velocity", trigger_data, notifications) do
-        {:ok, _} ->
-          :ok
-
-        {:error, changeset} ->
-          Logger.error("Failed to create alert history: #{inspect(changeset.errors)}")
-      end
-
-      case Alerts.update_alert_state(alert, %{
-             last_triggered_at: now,
-             last_checked_at: now
-           }) do
-        {:ok, _} ->
-          :ok
-
-        {:error, changeset} ->
-          Logger.error("Failed to update alert state: #{inspect(changeset.errors)}")
-      end
+      _ = Alerts.create_alert_history(alert, "velocity", trigger_data, notifications)
+      Alerts.update_alert_state(alert, %{last_triggered_at: now, last_checked_at: now})
     else
       Alerts.update_alert_state(alert, %{last_checked_at: now})
     end
   end
 
-  defp count_matches_in_window(search_query, window_seconds) do
-    cutoff = DateTime.add(DateTime.utc_now(), -window_seconds, :second)
+  defp count_matches_in_window(search_query, seconds) do
+    cutoff = DateTime.add(DateTime.utc_now(), -seconds, :second)
 
-    case SearchParser.parse(search_query) do
-      {:ok, []} ->
-        0
-
-      {:ok, tokens} ->
-        Log
-        |> where([l], l.timestamp >= ^cutoff)
-        |> Logs.apply_search_tokens(tokens)
-        |> Repo.aggregate(:count, :id, timeout: @query_timeout)
+    with {:ok, [_ | _] = tokens} <- SearchParser.parse(search_query) do
+      Log
+      |> where([l], l.inserted_at >= ^cutoff)
+      |> Logs.apply_search_tokens(tokens)
+      |> aggregate_with_timeout()
+    else
+      _ -> 0
     end
   end
+
+  defp one_with_timeout(query),
+    do: with_statement_timeout(fn -> Repo.one(query, timeout: query_timeout()) end)
+
+  defp aggregate_with_timeout(query),
+    do:
+      with_statement_timeout(fn ->
+        Repo.aggregate(query, :count, :id, timeout: query_timeout())
+      end)
+
+  defp with_statement_timeout(fun) do
+    if WhisperLogs.DbAdapter.postgres?() do
+      {:ok, result} =
+        Repo.transaction(
+          fn ->
+            Repo.query!("SELECT set_config('statement_timeout', $1, true)", [
+              Integer.to_string(query_timeout())
+            ])
+
+            fun.()
+          end,
+          timeout: query_timeout() + 1_000
+        )
+
+      result
+    else
+      fun.()
+    end
+  end
+
+  defp query_timeout, do: WhisperLogs.Config.alert_limits().query_timeout_ms
+  defp mark_checked(alert), do: Alerts.update_alert_state(alert, %{last_checked_at: now()})
+  defp now, do: DateTime.utc_now() |> DateTime.truncate(:second)
 end

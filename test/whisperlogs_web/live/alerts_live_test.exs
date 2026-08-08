@@ -27,7 +27,6 @@ defmodule WhisperLogsWeb.AlertsLiveTest do
         |> Ecto.Changeset.change(%{
           email: "local@localhost",
           is_admin: true,
-          confirmed_at: now,
           inserted_at: now,
           updated_at: now
         })

@@ -5,32 +5,22 @@ config :bcrypt_elixir, :log_rounds, 1
 
 # Disable auto-migration in tests - mix test handles it
 config :whisperlogs, :auto_migrate, false
+config :whisperlogs, :bootstrap, enabled: false
+config :whisperlogs, :start_background_workers, false
+config :whisperlogs, :s3_allowed_hosts, ["s3.amazonaws.com"]
+
+if System.get_env("WHISPERLOGS_TEST_ADAPTER") == "sqlite" do
+  config :whisperlogs, :alert_limits, %{
+    max_concurrency: 1,
+    query_timeout_ms: 5_000,
+    cycle_timeout_ms: 20_000
+  }
+end
 
 # Configure both database repos - runtime.exs decides which one to start
 
-# Platform detection for SQLean regexp extension
-sqlean_platform =
-  case :os.type() do
-    {:unix, :darwin} ->
-      arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-      if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-        do: "macos-arm64",
-        else: "macos-x64"
-
-    {:unix, :linux} ->
-      arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-      if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-        do: "linux-arm64",
-        else: "linux-x64"
-
-    {:win32, _} ->
-      "win-x64"
-  end
-
-sqlean_regexp_ext =
-  Path.expand("../priv/sqlite_extensions/#{sqlean_platform}/regexp", __DIR__)
+{verify_sqlean, _binding} = Code.eval_file(Path.join(__DIR__, "sqlean.exs"))
+sqlean_regexp_ext = verify_sqlean.()
 
 # SQLite config (used when no DATABASE_URL)
 # Use pool_size: 1 to avoid "Database busy" errors with concurrent tests

@@ -26,7 +26,6 @@ defmodule WhisperLogsWeb.LogsLiveTest do
         |> Ecto.Changeset.change(%{
           email: "local@localhost",
           is_admin: true,
-          confirmed_at: now,
           inserted_at: now,
           updated_at: now
         })
@@ -37,9 +36,7 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     end
   end
 
-  # Note: In PostgreSQL mode, unauthenticated users are redirected.
-  # In SQLite mode (single-user), authentication is bypassed.
-  # These tests run in SQLite mode.
+  # Authentication is enforced identically on both database adapters.
 
   describe "mount and render" do
     test "renders logs page", %{conn: conn} do

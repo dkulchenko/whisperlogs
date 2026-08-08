@@ -21,19 +21,27 @@ defmodule WhisperLogsWeb.LogController do
 
   The source is taken from the API key, not the payload.
   """
-  def ingest(conn, %{"logs" => logs}) when is_list(logs) do
+  def ingest(conn, params) when is_map(params) do
     source = conn.assigns.source
+    logs = Map.get(params, "logs", :missing)
 
-    {count, _} = Logs.insert_batch(source, logs)
+    case Logs.insert_batch(source, logs) do
+      {:ok, inserted} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{ok: true, count: length(inserted)})
 
-    conn
-    |> put_status(:ok)
-    |> json(%{ok: true, count: count})
+      {:error, %{field: :logs, reason: reason} = error} when reason in [:empty, :too_many] ->
+        conn |> put_status(:request_entity_too_large) |> json(%{error: error})
+
+      {:error, error} ->
+        conn |> put_status(:unprocessable_entity) |> json(%{error: error})
+    end
   end
 
   def ingest(conn, _params) do
     conn
-    |> put_status(:bad_request)
-    |> json(%{error: "Missing 'logs' array in request body"})
+    |> put_status(:unprocessable_entity)
+    |> json(%{error: %{field: :logs, reason: :invalid_batch}})
   end
 end

@@ -6,9 +6,9 @@ defmodule WhisperLogsWeb.AlertsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    user = socket.assigns.current_scope.user
-    alerts = Alerts.list_alerts(user)
-    channels = Alerts.list_notification_channels(user)
+    scope = socket.assigns.current_scope
+    alerts = Alerts.list_alerts(scope)
+    channels = Alerts.list_notification_channels(scope)
 
     {:ok,
      socket
@@ -21,6 +21,9 @@ defmodule WhisperLogsWeb.AlertsLive do
      |> assign(:history_entries, [])
      |> assign(:match_counts, nil)
      |> assign(:counting, false)
+     |> assign(:preview_generation, 0)
+     |> assign(:preview_timer, nil)
+     |> assign(:preview_task, nil)
      |> reset_form()}
   end
 
@@ -429,8 +432,7 @@ defmodule WhisperLogsWeb.AlertsLive do
      socket
      |> assign(:show_form, false)
      |> assign(:editing_alert, nil)
-     |> assign(:match_counts, nil)
-     |> assign(:counting, false)
+     |> invalidate_preview()
      |> reset_form()}
   end
 
@@ -453,7 +455,7 @@ defmodule WhisperLogsWeb.AlertsLive do
   end
 
   def handle_event("save_alert", params, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
     channel_ids = Map.get(params, "channel_ids", [])
 
     attrs = %{
@@ -468,9 +470,9 @@ defmodule WhisperLogsWeb.AlertsLive do
 
     result =
       if socket.assigns.editing_alert do
-        Alerts.update_alert(socket.assigns.editing_alert, attrs, channel_ids)
+        Alerts.update_alert(scope, socket.assigns.editing_alert.id, attrs, channel_ids)
       else
-        Alerts.create_alert(user, attrs, channel_ids)
+        Alerts.create_alert(scope, attrs, channel_ids)
       end
 
     case result do
@@ -489,23 +491,22 @@ defmodule WhisperLogsWeb.AlertsLive do
          |> assign(:alerts, alerts)
          |> assign(:show_form, false)
          |> assign(:editing_alert, nil)
+         |> invalidate_preview()
          |> reset_form()
          |> put_flash(
            :info,
            if(socket.assigns.editing_alert, do: "Alert updated", else: "Alert created")
          )}
 
-      {:error, changeset} ->
+      {:error, reason} ->
         {:noreply,
          socket
-         |> put_flash(:error, format_errors(changeset))}
+         |> put_flash(:error, format_error(reason))}
     end
   end
 
   def handle_event("edit_alert", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
-
-    case Alerts.get_alert(user, String.to_integer(id)) do
+    case Alerts.get_alert(socket.assigns.current_scope, String.to_integer(id)) do
       nil ->
         {:noreply, put_flash(socket, :error, "Alert not found")}
 
@@ -533,14 +534,14 @@ defmodule WhisperLogsWeb.AlertsLive do
   end
 
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
 
-    case Alerts.get_alert(user, String.to_integer(id)) do
+    case Alerts.get_alert(scope, String.to_integer(id)) do
       nil ->
         {:noreply, put_flash(socket, :error, "Alert not found")}
 
       alert ->
-        case Alerts.toggle_alert(alert) do
+        case Alerts.toggle_alert(scope, alert.id) do
           {:ok, updated} ->
             alerts =
               Enum.map(socket.assigns.alerts, fn a ->
@@ -556,14 +557,14 @@ defmodule WhisperLogsWeb.AlertsLive do
   end
 
   def handle_event("delete_alert", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
 
-    case Alerts.get_alert(user, String.to_integer(id)) do
+    case Alerts.get_alert(scope, String.to_integer(id)) do
       nil ->
         {:noreply, put_flash(socket, :error, "Alert not found")}
 
       alert ->
-        case Alerts.delete_alert(alert) do
+        case Alerts.delete_alert(scope, alert.id) do
           {:ok, _} ->
             alerts = Enum.reject(socket.assigns.alerts, &(&1.id == alert.id))
 
@@ -587,14 +588,14 @@ defmodule WhisperLogsWeb.AlertsLive do
        |> assign(:expanded_history, nil)
        |> assign(:history_entries, [])}
     else
-      user = socket.assigns.current_scope.user
+      scope = socket.assigns.current_scope
 
-      case Alerts.get_alert(user, alert_id) do
+      case Alerts.get_alert(scope, alert_id) do
         nil ->
           {:noreply, put_flash(socket, :error, "Alert not found")}
 
-        alert ->
-          history = Alerts.list_alert_history(alert, limit: 10)
+        _alert ->
+          history = Alerts.list_alert_history(scope, alert_id, limit: 10)
 
           {:noreply,
            socket
@@ -605,33 +606,98 @@ defmodule WhisperLogsWeb.AlertsLive do
   end
 
   @impl true
-  def handle_info({:match_counts, counts}, socket) do
+  def handle_info({:run_match_preview, generation, query}, socket) do
+    if generation == socket.assigns.preview_generation do
+      owner = self()
+
+      case Task.Supervisor.start_child(WhisperLogs.Alerts.PreviewSupervisor, fn ->
+             send(owner, {:match_counts, generation, Logs.preview_counts(query)})
+           end) do
+        {:ok, pid} ->
+          {:noreply,
+           socket
+           |> assign(:preview_timer, nil)
+           |> assign(:preview_task, {pid, Process.monitor(pid)})}
+
+        {:error, :max_children} ->
+          {:noreply,
+           socket
+           |> assign(:preview_timer, nil)
+           |> assign(:counting, false)
+           |> put_flash(:error, "Preview temporarily unavailable")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info({:match_counts, generation, counts}, socket) do
+    if generation == socket.assigns.preview_generation do
+      {:noreply,
+       socket
+       |> clear_preview_task_monitor()
+       |> assign(:match_counts, counts)
+       |> assign(:counting, false)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, task_pid, _reason},
+        %{assigns: %{preview_task: {task_pid, ref}}} = socket
+      ) do
     {:noreply,
      socket
-     |> assign(:match_counts, counts)
+     |> assign(:preview_task, nil)
      |> assign(:counting, false)}
   end
 
   defp trigger_match_counting(socket, "") do
-    socket
-    |> assign(:match_counts, nil)
-    |> assign(:counting, false)
+    invalidate_preview(socket)
   end
 
   defp trigger_match_counting(socket, search_query) do
-    pid = self()
+    cancel_preview_timer(socket.assigns.preview_timer)
+    cancel_preview_task(socket.assigns.preview_task)
+    generation = socket.assigns.preview_generation + 1
+    timer = Process.send_after(self(), {:run_match_preview, generation, search_query}, 300)
 
-    Task.start(fn ->
-      counts = %{
-        hour: Logs.count_matches(search_query, 3600),
-        day: Logs.count_matches(search_query, 86400),
-        week: Logs.count_matches(search_query, 604_800)
-      }
+    socket
+    |> assign(:preview_generation, generation)
+    |> assign(:preview_timer, timer)
+    |> assign(:preview_task, nil)
+    |> assign(:counting, true)
+  end
 
-      send(pid, {:match_counts, counts})
-    end)
+  defp cancel_preview_timer(nil), do: :ok
+  defp cancel_preview_timer(ref), do: Process.cancel_timer(ref, async: true, info: false)
 
-    assign(socket, :counting, true)
+  defp cancel_preview_task(nil), do: :ok
+
+  defp cancel_preview_task({pid, ref}) do
+    _ = Task.Supervisor.terminate_child(WhisperLogs.Alerts.PreviewSupervisor, pid)
+    Process.demonitor(ref, [:flush])
+    :ok
+  end
+
+  defp clear_preview_task_monitor(%{assigns: %{preview_task: nil}} = socket), do: socket
+
+  defp clear_preview_task_monitor(%{assigns: %{preview_task: {_pid, ref}}} = socket) do
+    Process.demonitor(ref, [:flush])
+    assign(socket, :preview_task, nil)
+  end
+
+  defp invalidate_preview(socket) do
+    cancel_preview_timer(socket.assigns.preview_timer)
+    cancel_preview_task(socket.assigns.preview_task)
+
+    socket
+    |> assign(:match_counts, nil)
+    |> assign(:counting, false)
+    |> assign(:preview_timer, nil)
+    |> assign(:preview_task, nil)
+    |> update(:preview_generation, &(&1 + 1))
   end
 
   defp parse_int(nil), do: nil
@@ -681,7 +747,7 @@ defmodule WhisperLogsWeb.AlertsLive do
     end
   end
 
-  defp format_errors(changeset) do
+  defp format_error(%Ecto.Changeset{} = changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
       Enum.reduce(opts, msg, fn {key, value}, acc ->
         String.replace(acc, "%{#{key}}", to_string(value))
@@ -690,4 +756,12 @@ defmodule WhisperLogsWeb.AlertsLive do
     |> Enum.map(fn {field, messages} -> "#{field}: #{Enum.join(messages, ", ")}" end)
     |> Enum.join("; ")
   end
+
+  defp format_error(:alert_quota_exceeded), do: "Alert quota exceeded"
+  defp format_error(:enabled_alert_quota_exceeded), do: "Enabled alert quota exceeded"
+
+  defp format_error(:invalid_notification_channels),
+    do: "Select only notification channels you own"
+
+  defp format_error(reason), do: "Unable to save alert: #{inspect(reason)}"
 end

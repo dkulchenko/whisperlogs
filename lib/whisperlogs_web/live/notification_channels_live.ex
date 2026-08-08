@@ -5,8 +5,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    user = socket.assigns.current_scope.user
-    channels = Alerts.list_notification_channels(user)
+    channels = Alerts.list_notification_channels(socket.assigns.current_scope)
 
     {:ok,
      socket
@@ -368,9 +367,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("edit_channel", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
-
-    case Alerts.get_notification_channel(user, id) do
+    case Alerts.get_notification_channel(socket.assigns.current_scope, id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Channel not found")}
 
@@ -421,7 +418,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("save_email", %{"name" => name, "email" => email}, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
 
     if socket.assigns.editing_channel do
       # Update mode
@@ -430,7 +427,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         config: %{"email" => email}
       }
 
-      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+      case Alerts.update_notification_channel(scope, socket.assigns.editing_channel.id, attrs) do
         {:ok, updated} ->
           channels =
             Enum.map(socket.assigns.channels, fn c ->
@@ -459,7 +456,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         config: %{"email" => email}
       }
 
-      case Alerts.create_notification_channel(user, attrs) do
+      case Alerts.create_notification_channel(scope, attrs) do
         {:ok, channel} ->
           {:noreply,
            socket
@@ -478,7 +475,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("save_pushover", params, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
     priority = String.to_integer(params["priority"])
 
     if socket.assigns.editing_channel do
@@ -492,7 +489,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         }
       }
 
-      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+      case Alerts.update_notification_channel(scope, socket.assigns.editing_channel.id, attrs) do
         {:ok, updated} ->
           channels =
             Enum.map(socket.assigns.channels, fn c ->
@@ -528,7 +525,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         }
       }
 
-      case Alerts.create_notification_channel(user, attrs) do
+      case Alerts.create_notification_channel(scope, attrs) do
         {:ok, channel} ->
           {:noreply,
            socket
@@ -550,7 +547,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("save_slack", params, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
     webhook_url = String.trim(params["webhook_url"] || "")
 
     if socket.assigns.editing_channel do
@@ -566,7 +563,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         config: config
       }
 
-      case Alerts.update_notification_channel(socket.assigns.editing_channel, attrs) do
+      case Alerts.update_notification_channel(scope, socket.assigns.editing_channel.id, attrs) do
         {:ok, updated} ->
           channels =
             Enum.map(socket.assigns.channels, fn c ->
@@ -593,7 +590,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
         config: %{"webhook_url" => webhook_url}
       }
 
-      case Alerts.create_notification_channel(user, attrs) do
+      case Alerts.create_notification_channel(scope, attrs) do
         {:ok, channel} ->
           {:noreply,
            socket
@@ -611,14 +608,14 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("toggle_enabled", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
 
-    case Alerts.get_notification_channel(user, id) do
+    case Alerts.get_notification_channel(scope, id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Channel not found")}
 
       channel ->
-        case Alerts.update_notification_channel(channel, %{enabled: !channel.enabled}) do
+        case Alerts.update_notification_channel(scope, channel.id, %{enabled: !channel.enabled}) do
           {:ok, updated} ->
             channels =
               Enum.map(socket.assigns.channels, fn c ->
@@ -634,14 +631,14 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
   end
 
   def handle_event("delete", %{"id" => id}, socket) do
-    user = socket.assigns.current_scope.user
+    scope = socket.assigns.current_scope
 
-    case Alerts.get_notification_channel(user, id) do
+    case Alerts.get_notification_channel(scope, id) do
       nil ->
         {:noreply, put_flash(socket, :error, "Channel not found")}
 
       channel ->
-        case Alerts.delete_notification_channel(channel) do
+        case Alerts.delete_notification_channel(scope, channel.id) do
           {:ok, _} ->
             channels = Enum.reject(socket.assigns.channels, &(&1.id == channel.id))
 

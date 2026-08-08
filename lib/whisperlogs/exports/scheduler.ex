@@ -1,97 +1,104 @@
 defmodule WhisperLogs.Exports.Scheduler do
-  @moduledoc """
-  GenServer that runs scheduled exports before retention cleanup.
-
-  Runs daily, checking for destinations with auto_export_enabled and
-  creating export jobs for logs older than auto_export_age_days.
-  """
+  @moduledoc "The single sequential owner of pending and scheduled exports."
   use GenServer
-
   require Logger
 
   alias WhisperLogs.Exports
-  alias WhisperLogs.Exports.Exporter
+  alias WhisperLogs.Exports.{Exporter, Workspace}
 
   @check_interval :timer.hours(24)
 
-  def start_link(opts) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
-  end
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @impl true
   def init(_opts) do
-    # Schedule first run 30s after startup (before retention's 60s)
-    Process.send_after(self(), :run_scheduled_exports, :timer.seconds(30))
+    timeout = WhisperLogs.Config.export_limits().timeout_seconds
+    Workspace.cleanup_abandoned(timeout)
+    Exports.fail_interrupted_jobs()
+    send(self(), :scheduled_tick)
+    send(self(), :drain)
     {:ok, %{}}
   end
 
   @impl true
-  def handle_info(:run_scheduled_exports, state) do
-    run_all_scheduled_exports()
-    schedule_next_run()
+  def handle_cast(:drain, state) do
+    send(self(), :drain)
     {:noreply, state}
   end
 
-  defp run_all_scheduled_exports do
-    destinations = Exports.list_auto_export_destinations()
+  @impl true
+  def handle_info(:scheduled_tick, state) do
+    admit_next_scheduled_ranges()
+    send(self(), :drain)
+    Process.send_after(self(), :scheduled_tick, @check_interval)
+    {:noreply, state}
+  end
 
-    if destinations != [] do
-      Logger.info("Running scheduled exports for #{length(destinations)} destination(s)")
+  def handle_info(:drain, state) do
+    case Exports.next_pending_job() do
+      nil ->
+        {:noreply, state}
+
+      job ->
+        result = Exporter.run_export(job)
+
+        # A failed scheduled range retries only on a later startup/daily tick.
+        # Other destinations can use the newly freed capacity immediately.
+        skip_destination_id =
+          case result do
+            {:ok, %{status: "failed", trigger: "scheduled"} = failed} ->
+              failed.export_destination_id
+
+            _other ->
+              nil
+          end
+
+        admit_next_scheduled_ranges(skip_destination_id)
+
+        send(self(), :drain)
+        {:noreply, state}
     end
+  end
 
-    Enum.each(destinations, fn dest ->
-      try do
-        run_scheduled_export(dest)
-      rescue
-        error ->
-          Logger.error(
-            "Scheduled export failed for destination #{dest.id}: #{Exception.message(error)}"
-          )
+  def handle_info(_message, state), do: {:noreply, state}
+
+  defp admit_next_scheduled_ranges(skip_destination_id \\ nil) do
+    Exports.list_auto_export_destinations()
+    |> Enum.reject(&(&1.id == skip_destination_id))
+    |> Enum.each(fn destination ->
+      cutoff =
+        DateTime.utc_now()
+        |> DateTime.add(-destination.auto_export_age_days, :day)
+        |> DateTime.truncate(:second)
+
+      from =
+        Exports.get_last_successful_scheduled_export_end(destination) ||
+          Exports.oldest_observed_time()
+
+      if from && DateTime.compare(from, cutoff) == :lt do
+        to = min_datetime(DateTime.add(from, 1, :day), cutoff)
+
+        case Exports.admit_scheduled_job(destination, from, to) do
+          {:ok, _job} ->
+            :ok
+
+          {:error, reason}
+          when reason in [
+                 :user_pending_quota_exceeded,
+                 :global_pending_quota_exceeded,
+                 :duplicate_active_export
+               ] ->
+            :ok
+
+          {:error, reason} ->
+            Logger.warning(
+              "Could not admit scheduled export for destination #{destination.id}: #{inspect(reason)}"
+            )
+        end
       end
     end)
   end
 
-  defp run_scheduled_export(destination) do
-    # Calculate time range: logs older than auto_export_age_days
-    cutoff =
-      DateTime.utc_now()
-      |> DateTime.add(-destination.auto_export_age_days, :day)
-      |> DateTime.truncate(:second)
-
-    # Get the timestamp of last successful export to avoid re-exporting
-    last_export_end = Exports.get_last_successful_export_end(destination)
-
-    # Default start: epoch or oldest possible date
-    from_timestamp = last_export_end || ~U[2020-01-01 00:00:00Z]
-    to_timestamp = cutoff
-
-    # Only create job if there's a valid range (at least 1 hour of data)
-    if DateTime.compare(from_timestamp, to_timestamp) == :lt and
-         DateTime.diff(to_timestamp, from_timestamp, :hour) >= 1 do
-      Logger.info(
-        "Creating scheduled export for destination #{destination.id}: " <>
-          "#{DateTime.to_iso8601(from_timestamp)} to #{DateTime.to_iso8601(to_timestamp)}"
-      )
-
-      {:ok, job} =
-        Exports.create_export_job(destination, nil, %{
-          trigger: "scheduled",
-          from_timestamp: from_timestamp,
-          to_timestamp: to_timestamp
-        })
-
-      # Run export synchronously in scheduler context
-      # Could be made async if needed for parallel exports
-      Exporter.run_export(job)
-    else
-      Logger.debug(
-        "No logs to export for destination #{destination.id}: " <>
-          "range #{inspect(from_timestamp)} to #{inspect(to_timestamp)} is not valid"
-      )
-    end
-  end
-
-  defp schedule_next_run do
-    Process.send_after(self(), :run_scheduled_exports, @check_interval)
-  end
+  defp min_datetime(left, right),
+    do: if(DateTime.compare(left, right) == :gt, do: right, else: left)
 end

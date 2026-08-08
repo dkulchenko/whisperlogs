@@ -20,6 +20,7 @@ defmodule WhisperLogs.Alerts.Alert do
     field :velocity_window_seconds, :integer
     field :cooldown_seconds, :integer, default: 300
     field :last_seen_log_id, :integer
+    field :last_seen_inserted_at, :utc_datetime_usec
     field :last_triggered_at, :utc_datetime
     field :last_checked_at, :utc_datetime
 
@@ -58,7 +59,12 @@ defmodule WhisperLogs.Alerts.Alert do
 
   def state_changeset(alert, attrs) do
     alert
-    |> cast(attrs, [:last_seen_log_id, :last_triggered_at, :last_checked_at])
+    |> cast(attrs, [
+      :last_seen_log_id,
+      :last_seen_inserted_at,
+      :last_triggered_at,
+      :last_checked_at
+    ])
   end
 
   defp validate_search_query(changeset) do

@@ -24,7 +24,6 @@ defmodule WhisperLogsWeb.ExportsLiveTest do
         |> Ecto.Changeset.change(%{
           email: "local@localhost",
           is_admin: true,
-          confirmed_at: now,
           inserted_at: now,
           updated_at: now
         })
@@ -83,8 +82,7 @@ defmodule WhisperLogsWeb.ExportsLiveTest do
         lv
         |> form("#destination-form", %{
           "name" => "Test Local",
-          "destination_type" => "local",
-          "local_path" => "/tmp/exports"
+          "destination_type" => "local"
         })
         |> render_submit()
 

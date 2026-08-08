@@ -85,33 +85,22 @@ defmodule WhisperLogs.ExportsTest do
 
       assert destination.name == "My Local Export"
       assert destination.destination_type == "local"
-      assert destination.local_path == "/tmp/exports"
+      assert destination.local_path == nil
+      assert Exports.destination_path(destination) =~ "/#{scope.user.id}/#{destination.id}"
       assert destination.enabled == true
     end
 
-    test "validates local_path is required for local type" do
+    test "does not accept a caller-controlled local path" do
       scope = user_scope_fixture()
 
-      {:error, changeset} =
+      {:ok, destination} =
         Exports.create_export_destination(scope, %{
-          name: "Bad Local",
-          destination_type: "local"
-        })
-
-      assert errors_on(changeset) |> Map.has_key?(:local_path)
-    end
-
-    test "validates local_path cannot contain .." do
-      scope = user_scope_fixture()
-
-      {:error, changeset} =
-        Exports.create_export_destination(scope, %{
-          name: "Bad Path",
+          name: "Managed Local",
           destination_type: "local",
-          local_path: "/tmp/../etc"
+          local_path: "/tmp/../../etc"
         })
 
-      assert errors_on(changeset) |> Map.has_key?(:local_path)
+      assert destination.local_path == nil
     end
   end
 
@@ -159,7 +148,7 @@ defmodule WhisperLogs.ExportsTest do
       destination = local_destination_fixture(scope, name: "Original")
 
       {:ok, updated} =
-        Exports.update_export_destination(destination, %{
+        Exports.update_export_destination(scope, destination.id, %{
           name: "Updated"
         })
 
@@ -172,7 +161,7 @@ defmodule WhisperLogs.ExportsTest do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope, enabled: true)
 
-      {:ok, toggled} = Exports.toggle_export_destination(destination)
+      {:ok, toggled} = Exports.toggle_export_destination(scope, destination.id)
 
       assert toggled.enabled == false
     end
@@ -181,7 +170,7 @@ defmodule WhisperLogs.ExportsTest do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope, enabled: false)
 
-      {:ok, toggled} = Exports.toggle_export_destination(destination)
+      {:ok, toggled} = Exports.toggle_export_destination(scope, destination.id)
 
       assert toggled.enabled == true
     end
@@ -192,7 +181,7 @@ defmodule WhisperLogs.ExportsTest do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope)
 
-      {:ok, _} = Exports.delete_export_destination(destination)
+      {:ok, _} = Exports.delete_export_destination(scope, destination.id)
 
       assert Exports.get_export_destination(scope, destination.id) == nil
     end
@@ -279,7 +268,7 @@ defmodule WhisperLogs.ExportsTest do
       destination = local_destination_fixture(scope)
       job = export_job_fixture(destination, scope)
 
-      jobs = Exports.list_export_jobs_for_destination(destination)
+      jobs = Exports.list_export_jobs_for_destination(scope, destination.id)
       assert length(jobs) == 1
       assert hd(jobs).id == job.id
     end
@@ -305,7 +294,7 @@ defmodule WhisperLogs.ExportsTest do
     end
   end
 
-  describe "create_export_job/3" do
+  describe "create_manual_job/3" do
     test "creates job with valid attributes" do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope)
@@ -313,8 +302,7 @@ defmodule WhisperLogs.ExportsTest do
       now = DateTime.utc_now()
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: DateTime.add(now, -7, :day),
           to_timestamp: now
         })
@@ -330,8 +318,7 @@ defmodule WhisperLogs.ExportsTest do
       now = DateTime.utc_now()
 
       {:error, changeset} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: now,
           to_timestamp: DateTime.add(now, -1, :day)
         })
@@ -339,20 +326,20 @@ defmodule WhisperLogs.ExportsTest do
       assert errors_on(changeset) |> Map.has_key?(:to_timestamp)
     end
 
-    test "validates trigger is manual or scheduled" do
+    test "always derives the manual trigger" do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope)
 
       now = DateTime.utc_now()
 
-      {:error, changeset} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "invalid",
+      {:ok, job} =
+        Exports.create_manual_job(scope, destination.id, %{
+          trigger: "scheduled",
           from_timestamp: DateTime.add(now, -1, :day),
           to_timestamp: now
         })
 
-      assert errors_on(changeset) |> Map.has_key?(:trigger)
+      assert job.trigger == "manual"
     end
   end
 
@@ -407,7 +394,7 @@ defmodule WhisperLogs.ExportsTest do
     end
   end
 
-  describe "get_last_successful_export_end/1" do
+  describe "get_last_successful_scheduled_export_end/1" do
     test "returns timestamp from last completed job" do
       scope = user_scope_fixture()
       destination = local_destination_fixture(scope)
@@ -415,9 +402,12 @@ defmodule WhisperLogs.ExportsTest do
       to_timestamp = DateTime.utc_now()
 
       _completed_job =
-        completed_export_job_fixture(destination, scope, to_timestamp: to_timestamp)
+        completed_export_job_fixture(destination, scope,
+          trigger: "scheduled",
+          to_timestamp: to_timestamp
+        )
 
-      result = Exports.get_last_successful_export_end(destination)
+      result = Exports.get_last_successful_scheduled_export_end(destination)
       assert DateTime.compare(result, to_timestamp) == :eq
     end
 
@@ -426,7 +416,7 @@ defmodule WhisperLogs.ExportsTest do
       destination = local_destination_fixture(scope)
       _failed_job = failed_export_job_fixture(destination, scope)
 
-      assert Exports.get_last_successful_export_end(destination) == nil
+      assert Exports.get_last_successful_scheduled_export_end(destination) == nil
     end
   end
 
@@ -460,7 +450,7 @@ defmodule WhisperLogs.ExportsTest do
       # Stream must be called within transaction
       logs =
         Repo.transaction(fn ->
-          Exports.stream_logs_for_export(from, to)
+          Exports.stream_logs_for_export(from, to, "manual")
           |> Enum.to_list()
         end)
 
@@ -479,7 +469,7 @@ defmodule WhisperLogs.ExportsTest do
 
       {:ok, logs} =
         Repo.transaction(fn ->
-          Exports.stream_logs_for_export(from, to)
+          Exports.stream_logs_for_export(from, to, "manual")
           |> Enum.to_list()
         end)
 
@@ -487,5 +477,32 @@ defmodule WhisperLogs.ExportsTest do
       assert hd(logs).id == log1.id
       assert List.last(logs).id == log2.id
     end
+  end
+
+  describe "manual admission ownership and quotas" do
+    test "does not admit a job against another user's destination" do
+      owner_scope = user_scope_fixture()
+      other_scope = user_scope_fixture()
+      destination = local_destination_fixture(owner_scope)
+
+      assert {:error, :not_found} =
+               Exports.create_manual_job(other_scope, destination.id, manual_range(0))
+    end
+
+    test "rejects the first per-user pending export excess" do
+      scope = user_scope_fixture()
+      destination = local_destination_fixture(scope)
+
+      assert {:ok, _job} = Exports.create_manual_job(scope, destination.id, manual_range(0))
+      assert {:ok, _job} = Exports.create_manual_job(scope, destination.id, manual_range(2))
+
+      assert {:error, :user_pending_quota_exceeded} =
+               Exports.create_manual_job(scope, destination.id, manual_range(4))
+    end
+  end
+
+  defp manual_range(offset_days) do
+    from = DateTime.utc_now() |> DateTime.add(offset_days, :day) |> DateTime.truncate(:second)
+    %{from_timestamp: from, to_timestamp: DateTime.add(from, 1, :day)}
   end
 end

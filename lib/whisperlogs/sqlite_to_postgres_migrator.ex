@@ -24,12 +24,11 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :id,
         :email,
         :hashed_password,
-        :confirmed_at,
         :inserted_at,
         :updated_at,
         :is_admin
       ],
-      utc_datetime: [:confirmed_at, :inserted_at, :updated_at],
+      utc_datetime: [:inserted_at, :updated_at],
       booleans: [:is_admin]
     },
     %{
@@ -55,7 +54,6 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :name,
         :source,
         :key,
-        :last_used_at,
         :revoked_at,
         :inserted_at,
         :updated_at,
@@ -63,11 +61,14 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :port,
         :transport,
         :allowed_hosts,
-        :auto_register_hosts
+        :enabled,
+        :admission_mode,
+        :tls_framing,
+        :tls_client_identities
       ],
-      utc_datetime: [:last_used_at, :revoked_at, :inserted_at, :updated_at],
-      booleans: [:auto_register_hosts],
-      arrays: %{allowed_hosts: :string}
+      utc_datetime: [:revoked_at, :inserted_at, :updated_at],
+      booleans: [:enabled],
+      arrays: %{allowed_hosts: :string, tls_client_identities: :string}
     },
     %{
       table: "logs",
@@ -86,11 +87,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :name,
         :enabled,
         :config,
-        :verified_at,
         :inserted_at,
         :updated_at
       ],
-      utc_datetime: [:verified_at, :inserted_at, :updated_at],
+      utc_datetime: [:inserted_at, :updated_at],
       booleans: [:enabled],
       maps: %{config: %{}},
       default_user_id?: true
@@ -110,12 +110,14 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :velocity_window_seconds,
         :cooldown_seconds,
         :last_seen_log_id,
+        :last_seen_inserted_at,
         :last_triggered_at,
         :last_checked_at,
         :inserted_at,
         :updated_at
       ],
       utc_datetime: [:last_triggered_at, :last_checked_at, :inserted_at, :updated_at],
+      utc_datetime_usec: [:last_seen_inserted_at],
       booleans: [:enabled],
       default_user_id?: true
     },
@@ -231,8 +233,6 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
     source_path = source_path!(opts)
     batch_size = batch_size(opts)
     allow_non_empty? = allow_non_empty_target?(opts)
-    admin_email = admin_email!(opts)
-    admin_password = admin_password!(opts)
 
     configure_sqlite!(source_path)
     validate_source_file!(source_path)
@@ -245,15 +245,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
             assert_current_source_migrations!(sqlite_repo)
             assert_empty_target!(postgres_repo, allow_non_empty?)
 
-            admin_user_id = admin_user_id!(sqlite_repo)
+            admin_context = admin_context!(sqlite_repo, opts)
             target_counts_before = target_counts(postgres_repo)
 
-            context = %{
-              admin_user_id: admin_user_id,
-              admin_email: admin_email,
-              admin_password: admin_password,
-              target_counts_before: target_counts_before
-            }
+            context = Map.put(admin_context, :target_counts_before, target_counts_before)
 
             copy_tables(sqlite_repo, postgres_repo, batch_size, context)
             reset_sequences!(postgres_repo)
@@ -335,39 +330,6 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
       System.get_env("MIGRATION_ALLOW_NON_EMPTY_TARGET") in ~w(true 1 yes)
   end
 
-  defp admin_email!(opts) do
-    email = Keyword.get(opts, :admin_email) || System.get_env("ADMIN_EMAIL")
-
-    cond do
-      !is_binary(email) or email == "" ->
-        raise ArgumentError, "ADMIN_EMAIL is required"
-
-      !String.match?(email, ~r/^[^@,;\s]+@[^@,;\s]+$/) ->
-        raise ArgumentError, "ADMIN_EMAIL must be a valid email address"
-
-      true ->
-        email
-    end
-  end
-
-  defp admin_password!(opts) do
-    password = Keyword.get(opts, :admin_password) || System.get_env("ADMIN_PASSWORD")
-
-    cond do
-      !is_binary(password) or password == "" ->
-        raise ArgumentError, "ADMIN_PASSWORD is required"
-
-      String.length(password) < 12 ->
-        raise ArgumentError, "ADMIN_PASSWORD must be at least 12 characters"
-
-      byte_size(password) > 72 ->
-        raise ArgumentError, "ADMIN_PASSWORD must be at most 72 bytes"
-
-      true ->
-        password
-    end
-  end
-
   defp configure_sqlite!(source_path) do
     config =
       SQLite.config()
@@ -380,51 +342,9 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
       |> Keyword.put_new(:temp_store, :memory)
 
     config =
-      if Keyword.has_key?(config, :load_extensions) do
-        config
-      else
-        Keyword.put(config, :load_extensions, sqlite_extensions())
-      end
+      Keyword.put(config, :load_extensions, [WhisperLogs.SQLean.verified_extension_path!()])
 
     Application.put_env(@app, SQLite, config)
-  end
-
-  defp sqlite_extensions do
-    path =
-      Path.join([
-        :code.priv_dir(@app) |> to_string(),
-        "sqlite_extensions",
-        sqlean_platform(),
-        "regexp"
-      ])
-
-    if File.exists?(path) or File.exists?(path <> ".so") or File.exists?(path <> ".dylib") or
-         File.exists?(path <> ".dll") do
-      [path]
-    else
-      []
-    end
-  end
-
-  defp sqlean_platform do
-    case :os.type() do
-      {:unix, :darwin} ->
-        arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-        if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-          do: "macos-arm64",
-          else: "macos-x64"
-
-      {:unix, :linux} ->
-        arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-        if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-          do: "linux-arm64",
-          else: "linux-x64"
-
-      {:win32, _} ->
-        "win-x64"
-    end
   end
 
   defp validate_source_file!(source_path) do
@@ -501,24 +421,28 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
     end
   end
 
-  defp admin_user_id!(repo) do
-    local_id =
-      SQL.query!(
-        repo,
-        "SELECT id FROM users WHERE email = ? ORDER BY id LIMIT 1",
-        ["local@localhost"],
+  defp admin_context!(repo, opts) do
+    rows =
+      SQL.query!(repo, "SELECT id, email, hashed_password, is_admin FROM users ORDER BY id", [],
         timeout: :infinity
       ).rows
 
-    case local_id do
-      [[id]] ->
-        id
+    admins = Enum.filter(rows, fn [_id, _email, _password, admin] -> normalize_boolean(admin) end)
 
-      [] ->
-        case SQL.query!(repo, "SELECT id FROM users ORDER BY id LIMIT 1", [], timeout: :infinity).rows do
-          [[id]] -> id
-          [] -> raise ArgumentError, "SQLite source has no users to migrate"
-        end
+    case {rows, admins} do
+      {[[id, "local@localhost", nil, _]], [[id, "local@localhost", nil, _]]} ->
+        path =
+          Keyword.get(opts, :bootstrap_admin_password_file) ||
+            System.get_env("WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE")
+
+        password = WhisperLogs.Accounts.Bootstrap.read_password_file!(path)
+        %{admin_user_id: id, admin_password_hash: password_hash!(password)}
+
+      {_users, [[id, _email, password, _]]} when is_binary(password) ->
+        %{admin_user_id: id, admin_password_hash: nil}
+
+      _ ->
+        raise ArgumentError, "SQLite source does not satisfy the bootstrap administrator contract"
     end
   end
 
@@ -681,19 +605,32 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
 
   defp maybe_update_admin_user(%{id: id} = row, %{table: "users"}, %{
          admin_user_id: id,
-         admin_email: admin_email,
-         admin_password: admin_password
+         admin_password_hash: admin_password_hash
        }) do
-    now = DateTime.utc_now(:second)
-
-    row
-    |> Map.put(:email, admin_email)
-    |> Map.put(:hashed_password, Bcrypt.hash_pwd_salt(admin_password))
-    |> Map.put(:confirmed_at, row.confirmed_at || now)
-    |> Map.put(:is_admin, true)
+    if admin_password_hash do
+      row
+      |> Map.put(:hashed_password, admin_password_hash)
+      |> Map.put(:is_admin, true)
+    else
+      row
+    end
   end
 
   defp maybe_update_admin_user(row, _spec, _context), do: row
+
+  defp password_hash!(password) do
+    changeset =
+      User.password_changeset(%User{}, %{
+        "password" => password,
+        "password_confirmation" => password
+      })
+
+    if changeset.valid? do
+      Ecto.Changeset.get_change(changeset, :hashed_password)
+    else
+      raise ArgumentError, "bootstrap administrator password does not satisfy password policy"
+    end
+  end
 
   defp reset_sequences!(repo) do
     Enum.each(@sequence_tables, fn table ->

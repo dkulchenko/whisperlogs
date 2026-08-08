@@ -84,7 +84,7 @@ defmodule WhisperLogsWeb.UserLive.Registration do
 
   @impl true
   def handle_event("save", %{"user" => user_params}, socket) do
-    case Accounts.register_user(user_params) do
+    case Accounts.register_public_user(socket.assigns.current_scope, user_params) do
       {:ok, user} ->
         {:noreply,
          socket
@@ -93,6 +93,12 @@ defmodule WhisperLogsWeb.UserLive.Registration do
 
       {:error, %Ecto.Changeset{} = changeset} ->
         {:noreply, assign_form(socket, changeset)}
+
+      {:error, :registration_closed} ->
+        {:noreply,
+         socket
+         |> put_flash(:error, "Registration is closed.")
+         |> redirect(to: ~p"/users/log-in")}
     end
   end
 

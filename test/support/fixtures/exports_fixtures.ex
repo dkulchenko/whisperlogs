@@ -4,6 +4,8 @@ defmodule WhisperLogs.ExportsFixtures do
   """
 
   alias WhisperLogs.Exports
+  alias WhisperLogs.Exports.ExportJob
+  alias WhisperLogs.Repo
   import WhisperLogs.AccountsFixtures
 
   @doc """
@@ -17,7 +19,6 @@ defmodule WhisperLogs.ExportsFixtures do
   def local_destination_fixture(scope \\ nil, attrs \\ []) do
     scope = scope || user_scope_fixture()
     name = Keyword.get(attrs, :name, "Test Local Destination #{System.unique_integer()}")
-    local_path = Keyword.get(attrs, :local_path, System.tmp_dir!())
     enabled = Keyword.get(attrs, :enabled, true)
 
     {:ok, destination} =
@@ -25,7 +26,6 @@ defmodule WhisperLogs.ExportsFixtures do
         name: name,
         destination_type: "local",
         enabled: enabled,
-        local_path: local_path,
         auto_export_enabled: Keyword.get(attrs, :auto_export_enabled, false),
         auto_export_age_days: Keyword.get(attrs, :auto_export_age_days)
       })
@@ -51,7 +51,7 @@ defmodule WhisperLogs.ExportsFixtures do
         name: name,
         destination_type: "s3",
         enabled: enabled,
-        s3_endpoint: Keyword.get(attrs, :endpoint, "https://s3.amazonaws.com"),
+        s3_endpoint: Keyword.get(attrs, :endpoint, "s3.amazonaws.com"),
         s3_bucket: Keyword.get(attrs, :bucket, "test-bucket"),
         s3_region: Keyword.get(attrs, :region, "us-east-1"),
         s3_access_key_id: Keyword.get(attrs, :access_key_id, "AKIAIOSFODNN7EXAMPLE"),
@@ -98,11 +98,9 @@ defmodule WhisperLogs.ExportsFixtures do
     trigger = Keyword.get(attrs, :trigger, "manual")
 
     {:ok, job} =
-      Exports.create_export_job(destination, scope, %{
-        trigger: trigger,
-        from_timestamp: from,
-        to_timestamp: to
-      })
+      %ExportJob{export_destination_id: destination.id, user_id: scope.user.id}
+      |> ExportJob.changeset(%{trigger: trigger, from_timestamp: from, to_timestamp: to})
+      |> Repo.insert()
 
     job
   end

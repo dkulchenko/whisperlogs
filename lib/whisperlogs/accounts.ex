@@ -6,8 +6,7 @@ defmodule WhisperLogs.Accounts do
   import Ecto.Query, warn: false
   alias WhisperLogs.Repo
 
-  alias WhisperLogs.Accounts.{Source, User, UserToken, UserNotifier}
-  alias WhisperLogs.SourceCache
+  alias WhisperLogs.Accounts.{Scope, Source, User, UserToken, UserNotifier}
 
   ## Database getters
 
@@ -66,15 +65,13 @@ defmodule WhisperLogs.Accounts do
   @doc """
   Returns whether public registration is allowed.
 
-  Registration is allowed if:
-  - Config `:allow_public` is true, OR
-  - No users exist yet (first user setup)
+  Registration is allowed only when explicit configuration enables it.
   """
   def registration_allowed? do
     config = Application.get_env(:whisperlogs, :registration, [])
     allow_public = Keyword.get(config, :allow_public, false)
 
-    allow_public || Repo.aggregate(User, :count) == 0
+    allow_public
   end
 
   @doc """
@@ -98,14 +95,28 @@ defmodule WhisperLogs.Accounts do
       {:error, %Ecto.Changeset{}}
 
   """
-  def register_user(attrs) do
-    is_first_user = Repo.aggregate(User, :count) == 0
+  def register_public_user(%Scope{user: nil}, attrs), do: do_register_public_user(attrs)
+  def register_public_user(nil, attrs), do: do_register_public_user(attrs)
 
-    %User{}
-    |> User.registration_changeset(attrs)
-    |> Ecto.Changeset.put_change(:is_admin, is_first_user)
-    |> Ecto.Changeset.put_change(:confirmed_at, DateTime.utc_now(:second))
-    |> Repo.insert()
+  defp do_register_public_user(attrs) do
+    Repo.transaction(fn ->
+      if registration_allowed?() do
+        %User{}
+        |> User.registration_changeset(attrs)
+        |> Ecto.Changeset.put_change(:is_admin, false)
+        |> Repo.insert()
+        |> case do
+          {:ok, user} -> user
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      else
+        Repo.rollback(:registration_closed)
+      end
+    end)
+    |> case do
+      {:ok, user} -> {:ok, user}
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   ## Settings
@@ -296,7 +307,7 @@ defmodule WhisperLogs.Accounts do
   Creates a new HTTP source for a user.
   Generates an API key for authentication.
   """
-  def create_http_source(%User{} = user, attrs) do
+  def create_http_source(%Scope{user: %User{} = user}, attrs) do
     key = Source.generate_key()
 
     changeset =
@@ -314,26 +325,37 @@ defmodule WhisperLogs.Accounts do
   Creates a new syslog source for a user.
   Starts a listener on the specified port after creation.
   """
-  def create_syslog_source(%User{} = user, attrs) do
+  def create_syslog_source(%Scope{user: %User{} = user}, attrs) do
     changeset =
       %Source{user_id: user.id}
       |> Source.syslog_changeset(attrs)
 
-    case Repo.insert(changeset) do
-      {:ok, source} ->
-        # Start the listener
-        WhisperLogs.Syslog.Supervisor.start_listener(source)
-        {:ok, source}
+    result =
+      WhisperLogs.DbAdapter.serialized_transaction(:syslog_sources, fn ->
+        enforce_syslog_quota!(user.id)
 
-      {:error, changeset} ->
-        {:error, changeset}
+        case Repo.insert(changeset) do
+          {:ok, source} -> source
+          {:error, changeset} -> Repo.rollback(changeset)
+        end
+      end)
+
+    case result do
+      {:ok, source} ->
+        case WhisperLogs.Syslog.Supervisor.start_listener(source) do
+          {:ok, _pid} -> {:ok, source}
+          {:error, reason} -> {:error, {:listener_start_failed, source, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
   @doc """
   Lists all active (non-revoked) sources for a user.
   """
-  def list_sources(%User{id: user_id}) do
+  def list_sources(%Scope{user: %User{id: user_id}}) do
     Source
     |> where([s], s.user_id == ^user_id and is_nil(s.revoked_at))
     |> order_by([s], desc: s.inserted_at)
@@ -345,14 +367,14 @@ defmodule WhisperLogs.Accounts do
   """
   def list_syslog_sources do
     Source
-    |> where([s], s.type == "syslog" and is_nil(s.revoked_at))
+    |> where([s], s.type == "syslog" and s.enabled and is_nil(s.revoked_at))
     |> Repo.all()
   end
 
   @doc """
   Gets a source by ID for a user.
   """
-  def get_source(%User{id: user_id}, source_id) do
+  def get_source(%Scope{user: %User{id: user_id}}, source_id) do
     Repo.get_by(Source, id: source_id, user_id: user_id)
   end
 
@@ -361,29 +383,12 @@ defmodule WhisperLogs.Accounts do
 
   Returns `{:ok, source}` if valid and active, `{:error, :invalid_key}` otherwise.
 
-  Results are cached in ETS for 15s to reduce database load during high-volume ingestion.
+  The active source is queried directly so revocation takes effect immediately.
   """
   def get_source_by_token(key) when is_binary(key) do
-    case SourceCache.get_source(key) do
-      {:ok, source} ->
-        {:ok, source}
-
-      :miss ->
-        case fetch_source_from_db(key) do
-          {:ok, source} = result ->
-            SourceCache.cache_source(key, source)
-            result
-
-          error ->
-            error
-        end
-    end
-  end
-
-  defp fetch_source_from_db(key) do
     query =
       from s in Source,
-        where: s.key == ^key and is_nil(s.revoked_at) and s.type == "http",
+        where: s.key == ^key and s.enabled and is_nil(s.revoked_at) and s.type == "http",
         preload: [:user]
 
     case Repo.one(query) do
@@ -396,67 +401,186 @@ defmodule WhisperLogs.Accounts do
   Revokes a source (soft delete).
   Stops the syslog listener if it's a syslog source.
   """
-  def revoke_source(%Source{type: "syslog"} = source) do
-    # Stop the listener first
-    WhisperLogs.Syslog.Supervisor.stop_listener(source.id)
-
-    source
-    |> Ecto.Changeset.change(revoked_at: DateTime.utc_now(:second))
-    |> Repo.update()
-  end
-
-  def revoke_source(%Source{} = source) do
-    source
-    |> Ecto.Changeset.change(revoked_at: DateTime.utc_now(:second))
-    |> Repo.update()
+  def revoke_source(%Scope{} = scope, source_id) do
+    with %Source{} = source <- get_source(scope, source_id),
+         {:ok, source} <-
+           source
+           |> Ecto.Changeset.change(enabled: false, revoked_at: DateTime.utc_now(:second))
+           |> Repo.update() do
+      if source.type == "syslog", do: WhisperLogs.Syslog.Supervisor.stop_listener(source.id)
+      {:ok, source}
+    else
+      nil -> {:error, :not_found}
+      error -> error
+    end
   end
 
   @doc """
   Updates an HTTP source (name only).
   """
-  def update_http_source(%Source{type: "http"} = source, attrs) do
-    source
-    |> Source.update_http_changeset(attrs)
-    |> Repo.update()
+  def update_http_source(%Scope{} = scope, source_id, attrs) do
+    case get_source(scope, source_id) do
+      %Source{type: "http"} = source ->
+        source |> Source.update_http_changeset(attrs) |> Repo.update()
+
+      _other ->
+        {:error, :not_found}
+    end
   end
 
   @doc """
   Updates a syslog source.
   Restarts the listener if port or transport changes.
   """
-  def update_syslog_source(%Source{type: "syslog"} = source, attrs) do
-    old_port = source.port
-    old_transport = source.transport
+  def update_syslog_source(%Scope{} = scope, source_id, attrs) do
+    source = get_source(scope, source_id)
 
-    case source |> Source.update_syslog_changeset(attrs) |> Repo.update() do
-      {:ok, updated} ->
-        # Restart listener if port or transport changed
-        if updated.port != old_port or updated.transport != old_transport do
-          WhisperLogs.Syslog.Supervisor.stop_listener(updated.id)
-          WhisperLogs.Syslog.Supervisor.start_listener(updated)
+    with %Source{type: "syslog"} <- source,
+         old_port = source.port,
+         old_transport = source.transport,
+         {:ok, updated} <- source |> Source.update_syslog_changeset(attrs) |> Repo.update() do
+      restart? = updated.port != old_port or updated.transport != old_transport
+      restart? = restart? or updated.tls_framing != source.tls_framing
+
+      result =
+        cond do
+          not updated.enabled ->
+            :ok
+
+          restart? ->
+            WhisperLogs.Syslog.Supervisor.stop_listener(updated.id)
+            start_listener_result(updated)
+
+          true ->
+            WhisperLogs.Syslog.Supervisor.replace_policy(updated)
         end
 
-        {:ok, updated}
-
-      error ->
-        error
+      case result do
+        :ok -> {:ok, updated}
+        {:error, reason} -> {:error, {:listener_update_failed, updated, reason}}
+      end
+    else
+      nil -> {:error, :not_found}
+      %Source{} -> {:error, :not_found}
+      error -> error
     end
   end
 
-  @doc """
-  Updates the last_used_at timestamp for a source.
-  Called asynchronously from the auth plug.
+  def enable_syslog_source(%Scope{user: %User{id: user_id}} = scope, source_id) do
+    result =
+      WhisperLogs.DbAdapter.serialized_transaction(:syslog_sources, fn ->
+        case get_source(scope, source_id) do
+          %Source{type: "syslog", enabled: false} = source ->
+            enforce_syslog_quota!(user_id)
 
-  Throttled to once per 15s per source to reduce database writes during high-volume ingestion.
-  """
-  def touch_source(%Source{id: id}) do
-    if SourceCache.should_touch?(id) do
-      SourceCache.mark_touched(id)
+            source
+            |> Source.persisted_syslog_changeset()
+            |> Ecto.Changeset.put_change(:enabled, true)
+            |> Repo.update()
+            |> case do
+              {:ok, updated} -> updated
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
 
-      from(s in Source, where: s.id == ^id)
-      |> Repo.update_all(set: [last_used_at: DateTime.utc_now(:second)])
-    else
-      :ok
+          %Source{type: "syslog", enabled: true} = source ->
+            source
+
+          _other ->
+            Repo.rollback(:not_found)
+        end
+      end)
+
+    case result do
+      {:ok, updated} ->
+        case start_listener_result(updated) do
+          :ok -> {:ok, updated}
+          {:error, reason} -> {:error, {:listener_start_failed, updated, reason}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  def disable_syslog_source(%Scope{} = scope, source_id) do
+    result =
+      WhisperLogs.DbAdapter.serialized_transaction(:syslog_sources, fn ->
+        case get_source(scope, source_id) do
+          %Source{type: "syslog"} = source ->
+            source
+            |> Ecto.Changeset.change(enabled: false)
+            |> Repo.update()
+            |> case do
+              {:ok, updated} -> updated
+              {:error, changeset} -> Repo.rollback(changeset)
+            end
+
+          _other ->
+            Repo.rollback(:not_found)
+        end
+      end)
+
+    case result do
+      {:ok, updated} ->
+        WhisperLogs.Syslog.Supervisor.stop_listener(updated.id)
+        {:ok, updated}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp enforce_syslog_quota!(user_id) do
+    per_user =
+      Repo.aggregate(
+        from(s in Source,
+          where:
+            s.type == "syslog" and s.enabled and is_nil(s.revoked_at) and s.user_id == ^user_id
+        ),
+        :count
+      )
+
+    global =
+      Repo.aggregate(
+        from(s in Source, where: s.type == "syslog" and s.enabled and is_nil(s.revoked_at)),
+        :count
+      )
+
+    cond do
+      per_user >= 20 -> Repo.rollback(:syslog_user_quota_exceeded)
+      global >= 500 -> Repo.rollback(:syslog_global_quota_exceeded)
+      true -> :ok
+    end
+  end
+
+  @doc "Validates enabled syslog rows and their global/per-owner startup quotas."
+  def validated_syslog_sources_for_startup do
+    sources = list_syslog_sources()
+
+    invalid_ids =
+      for source <- sources,
+          not Source.persisted_syslog_changeset(source).valid?,
+          do: source.id
+
+    over_limit_users =
+      sources
+      |> Enum.frequencies_by(& &1.user_id)
+      |> Enum.filter(fn {_user_id, count} -> count > 20 end)
+      |> Enum.map(&elem(&1, 0))
+
+    cond do
+      invalid_ids != [] -> {:error, {:invalid_sources, invalid_ids}}
+      over_limit_users != [] -> {:error, {:user_quota_exceeded, over_limit_users}}
+      length(sources) > 500 -> {:error, {:global_quota_exceeded, length(sources)}}
+      true -> {:ok, sources}
+    end
+  end
+
+  defp start_listener_result(source) do
+    case WhisperLogs.Syslog.Supervisor.start_listener(source) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -467,7 +591,7 @@ defmodule WhisperLogs.Accounts do
   def next_available_syslog_port(base_port \\ 10514) do
     used_ports =
       Source
-      |> where([s], s.type == "syslog" and is_nil(s.revoked_at))
+      |> where([s], s.type == "syslog" and s.enabled and is_nil(s.revoked_at))
       |> select([s], s.port)
       |> Repo.all()
       |> MapSet.new()

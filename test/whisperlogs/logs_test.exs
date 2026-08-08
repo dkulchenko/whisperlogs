@@ -212,4 +212,118 @@ defmodule WhisperLogs.LogsTest do
       assert hd(logs).message == "request failed"
     end
   end
+
+  describe "bounded batch validation" do
+    test "rejects empty and excessive batches" do
+      limits = WhisperLogs.Config.receiver_limits()
+
+      assert {:error, %{field: :logs, reason: :empty}} = Logs.insert_batch("api", [])
+
+      events = List.duplicate(%{"message" => "event"}, limits.max_batch_size + 1)
+
+      assert {:error, %{field: :logs, reason: :too_many}} =
+               Logs.insert_batch("api", events)
+    end
+
+    test "rejects a malformed event atomically with its index" do
+      assert {:error, %{field: :level, reason: :invalid_value, index: 1}} =
+               Logs.insert_batch("api", [
+                 %{"message" => "valid"},
+                 %{"message" => "invalid", "level" => "fatal"}
+               ])
+
+      assert Logs.list_logs(sources: ["api"]) == []
+    end
+
+    test "normalizes defaults and derives source authority from the caller" do
+      assert {:ok, [log]} =
+               Logs.insert_batch("trusted-source", [
+                 %{
+                   "level" => "warn",
+                   "source" => "payload-source",
+                   "request_id" => "req-1",
+                   "metadata" => %{"source" => "metadata-source"}
+                 }
+               ])
+
+      assert log.level == "warning"
+      assert log.message == ""
+      assert log.source == "trusted-source"
+      assert log.metadata == %{"request_id" => "req-1", "source" => "metadata-source"}
+      assert log.timestamp == log.inserted_at
+    end
+
+    test "measures UTF-8 bytes, metadata depth, and the merged request id" do
+      with_receiver_limits(
+        %{
+          max_message_bytes: 4,
+          max_metadata_bytes: 20,
+          max_metadata_depth: 2,
+          max_event_bytes: 200,
+          max_request_bytes: 400
+        },
+        fn ->
+          assert {:ok, [_log]} = Logs.insert_batch("api", [%{"message" => "éé"}])
+
+          assert {:error, %{field: :message, reason: :too_large}} =
+                   Logs.insert_batch("api", [%{"message" => "ééa"}])
+
+          assert {:error, %{field: :metadata, reason: :too_deep}} =
+                   Logs.insert_batch("api", [%{"metadata" => %{"a" => %{"b" => %{}}}}])
+
+          assert {:error, %{field: :metadata, reason: :too_large}} =
+                   Logs.insert_batch("api", [%{"request_id" => String.duplicate("x", 20)}])
+        end
+      )
+    end
+
+    test "publishes exactly one bounded event after a successful batch" do
+      :ok = Logs.subscribe()
+
+      assert {:ok, inserted} =
+               Logs.insert_batch("api", [%{"message" => "one"}, %{"message" => "two"}])
+
+      assert_receive {:new_logs, ^inserted}
+      refute_receive {:new_logs, _other}
+    end
+  end
+
+  describe "numeric metadata comparisons" do
+    test "matches only native numbers and canonical bounded decimal strings" do
+      assert {:ok, _logs} =
+               Logs.insert_batch("api", [
+                 %{"message" => "native", "metadata" => %{"duration" => 12.5}},
+                 %{"message" => "string", "metadata" => %{"duration" => "13"}},
+                 %{"message" => "boolean", "metadata" => %{"duration" => true}},
+                 %{"message" => "malformed", "metadata" => %{"duration" => "13ms"}},
+                 %{"message" => "array", "metadata" => %{"duration" => [14]}},
+                 %{
+                   "message" => "numeric-overflow",
+                   "metadata" => %{
+                     "duration" => "1e999999999999999999999999999999999999999"
+                   }
+                 },
+                 %{
+                   "message" => "long",
+                   "metadata" => %{"duration" => String.duplicate("1", 129)}
+                 }
+               ])
+
+      assert Logs.list_logs(search: "duration:>12") |> Enum.map(& &1.message) |> Enum.sort() ==
+               ["native", "string"]
+
+      assert Logs.list_logs(search: "-duration:>12") == []
+    end
+  end
+
+  defp with_receiver_limits(overrides, fun) do
+    old = Application.fetch_env!(:whisperlogs, :receiver_limits)
+    Application.put_env(:whisperlogs, :receiver_limits, Map.merge(old, overrides))
+
+    try do
+      fun.()
+    after
+      Application.put_env(:whisperlogs, :receiver_limits, old)
+    end
+  end
 end

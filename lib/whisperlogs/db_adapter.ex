@@ -33,6 +33,27 @@ defmodule WhisperLogs.DbAdapter do
     Application.get_env(:whisperlogs, :db_adapter, :sqlite) == :postgres
   end
 
+  @serialized_namespaces %{alerts: 1_019_001, exports: 1_019_002, syslog_sources: 1_019_003}
+
+  @doc """
+  Runs a count-and-mutate operation under one adapter-specific namespace lock.
+
+  PostgreSQL uses a transaction-scoped advisory lock. SQLite starts an immediate
+  transaction so the writer reservation is acquired before the quota read.
+  """
+  def serialized_transaction(namespace, fun)
+      when is_map_key(@serialized_namespaces, namespace) and is_function(fun, 0) do
+    if sqlite?() do
+      WhisperLogs.Repo.transaction(fun, mode: :immediate)
+    else
+      WhisperLogs.Repo.transaction(fn ->
+        lock = Map.fetch!(@serialized_namespaces, namespace)
+        WhisperLogs.Repo.query!("SELECT pg_advisory_xact_lock($1)", [lock])
+        fun.()
+      end)
+    end
+  end
+
   # ===========================================================================
   # Composite Query Helpers (for common patterns in logs.ex)
   # ===========================================================================
@@ -212,10 +233,10 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.timestamp), :utc_datetime)
+        type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.inserted_at), :utc_datetime)
       )
     else
-      dynamic([l], fragment("date_trunc('hour', ?)", l.timestamp))
+      dynamic([l], fragment("date_trunc('hour', ?)", l.inserted_at))
     end
   end
 
@@ -227,10 +248,10 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.timestamp), :utc_datetime)
+        type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.inserted_at), :utc_datetime)
       )
     else
-      dynamic([l], fragment("date_trunc('day', ?)", l.timestamp))
+      dynamic([l], fragment("date_trunc('day', ?)", l.inserted_at))
     end
   end
 
@@ -242,10 +263,10 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic(
         [l],
-        type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.timestamp), :utc_datetime)
+        type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.inserted_at), :utc_datetime)
       )
     else
-      dynamic([l], fragment("date_trunc('month', ?)", l.timestamp))
+      dynamic([l], fragment("date_trunc('month', ?)", l.inserted_at))
     end
   end
 
@@ -273,13 +294,13 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic([l], %{
         timestamp:
-          type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.timestamp), :utc_datetime),
+          type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
-        timestamp: fragment("date_trunc('hour', ?)", l.timestamp),
+        timestamp: fragment("date_trunc('hour', ?)", l.inserted_at),
         count: count(l.id),
         bytes:
           sum(
@@ -300,13 +321,13 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic([l], %{
         timestamp:
-          type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.timestamp), :utc_datetime),
+          type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
-        timestamp: fragment("date_trunc('day', ?)", l.timestamp),
+        timestamp: fragment("date_trunc('day', ?)", l.inserted_at),
         count: count(l.id),
         bytes:
           sum(
@@ -327,13 +348,13 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic([l], %{
         timestamp:
-          type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.timestamp), :utc_datetime),
+          type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
         bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
-        timestamp: fragment("date_trunc('month', ?)", l.timestamp),
+        timestamp: fragment("date_trunc('month', ?)", l.inserted_at),
         count: count(l.id),
         bytes:
           sum(
@@ -413,82 +434,212 @@ defmodule WhisperLogs.DbAdapter do
   JSON numeric comparison (runtime key and operator).
   Operators: :gt, :gte, :lt, :lte
   """
+  # Keep string-number semantics identical on SQLite REAL and PostgreSQL numeric.
+  # Canonical decimal strings use ordinary decimal notation; producers that need
+  # scientific notation can send a native JSON number. This prevents SQLite
+  # infinities and PostgreSQL numeric overflows before either adapter casts.
+  @canonical_decimal_pattern "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
+
   def json_numeric_compare(field_name, key, op, num) when is_atom(field_name) and is_atom(op) do
     json_path = "$.#{key}"
 
     if sqlite?() do
-      case op do
-        :gt ->
-          dynamic(
-            [l],
-            fragment(
-              "CAST(json_extract(?, ?) AS REAL) > ?",
-              field(l, ^field_name),
-              ^json_path,
-              ^num
-            )
-          )
-
-        :gte ->
-          dynamic(
-            [l],
-            fragment(
-              "CAST(json_extract(?, ?) AS REAL) >= ?",
-              field(l, ^field_name),
-              ^json_path,
-              ^num
-            )
-          )
-
-        :lt ->
-          dynamic(
-            [l],
-            fragment(
-              "CAST(json_extract(?, ?) AS REAL) < ?",
-              field(l, ^field_name),
-              ^json_path,
-              ^num
-            )
-          )
-
-        :lte ->
-          dynamic(
-            [l],
-            fragment(
-              "CAST(json_extract(?, ?) AS REAL) <= ?",
-              field(l, ^field_name),
-              ^json_path,
-              ^num
-            )
-          )
-      end
+      sqlite_numeric_compare(field_name, json_path, op, num)
     else
-      case op do
-        :gt ->
-          dynamic(
-            [l],
-            fragment("NULLIF(?->>?, '')::numeric > ?", field(l, ^field_name), ^key, ^num)
-          )
-
-        :gte ->
-          dynamic(
-            [l],
-            fragment("NULLIF(?->>?, '')::numeric >= ?", field(l, ^field_name), ^key, ^num)
-          )
-
-        :lt ->
-          dynamic(
-            [l],
-            fragment("NULLIF(?->>?, '')::numeric < ?", field(l, ^field_name), ^key, ^num)
-          )
-
-        :lte ->
-          dynamic(
-            [l],
-            fragment("NULLIF(?->>?, '')::numeric <= ?", field(l, ^field_name), ^key, ^num)
-          )
-      end
+      postgres_numeric_compare(field_name, key, op, num)
     end
+  end
+
+  defp sqlite_numeric_compare(field_name, path, :gt, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN json_type(?, ?) IN ('integer','real') THEN CAST(json_extract(?, ?) AS REAL) WHEN json_type(?, ?) = 'text' AND length(json_extract(?, ?)) <= 128 AND json_extract(?, ?) REGEXP ? THEN CAST(json_extract(?, ?) AS REAL) END) > ?",
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^path,
+        ^num
+      )
+    )
+  end
+
+  defp sqlite_numeric_compare(field_name, path, :gte, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN json_type(?, ?) IN ('integer','real') THEN CAST(json_extract(?, ?) AS REAL) WHEN json_type(?, ?) = 'text' AND length(json_extract(?, ?)) <= 128 AND json_extract(?, ?) REGEXP ? THEN CAST(json_extract(?, ?) AS REAL) END) >= ?",
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^path,
+        ^num
+      )
+    )
+  end
+
+  defp sqlite_numeric_compare(field_name, path, :lt, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN json_type(?, ?) IN ('integer','real') THEN CAST(json_extract(?, ?) AS REAL) WHEN json_type(?, ?) = 'text' AND length(json_extract(?, ?)) <= 128 AND json_extract(?, ?) REGEXP ? THEN CAST(json_extract(?, ?) AS REAL) END) < ?",
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^path,
+        ^num
+      )
+    )
+  end
+
+  defp sqlite_numeric_compare(field_name, path, :lte, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN json_type(?, ?) IN ('integer','real') THEN CAST(json_extract(?, ?) AS REAL) WHEN json_type(?, ?) = 'text' AND length(json_extract(?, ?)) <= 128 AND json_extract(?, ?) REGEXP ? THEN CAST(json_extract(?, ?) AS REAL) END) <= ?",
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        field(l, ^field_name),
+        ^path,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^path,
+        ^num
+      )
+    )
+  end
+
+  defp postgres_numeric_compare(field_name, key, :gt, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric WHEN jsonb_typeof(?->?) = 'string' AND octet_length(?->>?) <= 128 AND (?->>?) ~ ? AND pg_input_is_valid(?->>?, 'numeric') THEN (?->>?)::numeric END) > ?",
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^num
+      )
+    )
+  end
+
+  defp postgres_numeric_compare(field_name, key, :gte, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric WHEN jsonb_typeof(?->?) = 'string' AND octet_length(?->>?) <= 128 AND (?->>?) ~ ? AND pg_input_is_valid(?->>?, 'numeric') THEN (?->>?)::numeric END) >= ?",
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^num
+      )
+    )
+  end
+
+  defp postgres_numeric_compare(field_name, key, :lt, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric WHEN jsonb_typeof(?->?) = 'string' AND octet_length(?->>?) <= 128 AND (?->>?) ~ ? AND pg_input_is_valid(?->>?, 'numeric') THEN (?->>?)::numeric END) < ?",
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^num
+      )
+    )
+  end
+
+  defp postgres_numeric_compare(field_name, key, :lte, num) do
+    dynamic(
+      [l],
+      fragment(
+        "(CASE WHEN jsonb_typeof(?->?) = 'number' THEN (?->>?)::numeric WHEN jsonb_typeof(?->?) = 'string' AND octet_length(?->>?) <= 128 AND (?->>?) ~ ? AND pg_input_is_valid(?->>?, 'numeric') THEN (?->>?)::numeric END) <= ?",
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^@canonical_decimal_pattern,
+        field(l, ^field_name),
+        ^key,
+        field(l, ^field_name),
+        ^key,
+        ^num
+      )
+    )
   end
 
   @doc """
@@ -505,19 +656,7 @@ defmodule WhisperLogs.DbAdapter do
         :lte -> :gt
       end
 
-    json_path = "$.#{key}"
-
-    if sqlite?() do
-      is_null =
-        dynamic([l], fragment("json_extract(?, ?) IS NULL", field(l, ^field_name), ^json_path))
-
-      compare = json_numeric_compare(field_name, key, negated_op, num)
-      dynamic([l], ^is_null or ^compare)
-    else
-      is_null = dynamic([l], fragment("?->>? IS NULL", field(l, ^field_name), ^key))
-      compare = json_numeric_compare(field_name, key, negated_op, num)
-      dynamic([l], ^is_null or ^compare)
-    end
+    json_numeric_compare(field_name, key, negated_op, num)
   end
 
   @doc """

@@ -21,7 +21,7 @@ defmodule WhisperLogs.AlertsFixtures do
     enabled = Keyword.get(attrs, :enabled, true)
 
     {:ok, channel} =
-      Alerts.create_notification_channel(user, %{
+      Alerts.create_notification_channel(user_scope_fixture(user), %{
         name: name,
         channel_type: "email",
         enabled: enabled,
@@ -47,7 +47,7 @@ defmodule WhisperLogs.AlertsFixtures do
     enabled = Keyword.get(attrs, :enabled, true)
 
     {:ok, channel} =
-      Alerts.create_notification_channel(user, %{
+      Alerts.create_notification_channel(user_scope_fixture(user), %{
         name: name,
         channel_type: "pushover",
         enabled: enabled,
@@ -82,7 +82,7 @@ defmodule WhisperLogs.AlertsFixtures do
       )
 
     {:ok, channel} =
-      Alerts.create_notification_channel(user, %{
+      Alerts.create_notification_channel(user_scope_fixture(user), %{
         name: name,
         channel_type: "slack",
         enabled: enabled,
@@ -126,7 +126,7 @@ defmodule WhisperLogs.AlertsFixtures do
 
     {:ok, alert} =
       Alerts.create_alert(
-        user,
+        user_scope_fixture(user),
         %{
           name: name,
           search_query: search_query,
@@ -160,7 +160,7 @@ defmodule WhisperLogs.AlertsFixtures do
 
     {:ok, alert} =
       Alerts.create_alert(
-        user,
+        user_scope_fixture(user),
         %{
           name: name,
           search_query: search_query,

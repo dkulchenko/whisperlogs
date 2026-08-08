@@ -7,6 +7,8 @@ defmodule WhisperLogs.Application do
 
   @impl true
   def start(_type, _args) do
+    WhisperLogs.Config.validate!()
+
     # For SQLite mode, auto-create database and run migrations on startup
     # This makes it work out of the box without manual setup
     maybe_auto_migrate()
@@ -19,24 +21,31 @@ defmodule WhisperLogs.Application do
         WhisperLogs.Repo.Postgres
       end
 
-    children = [
+    infrastructure = [
       WhisperLogsWeb.Telemetry,
       repo,
-      {DNSCluster, query: Application.get_env(:whisperlogs, :dns_cluster_query) || :ignore},
+      WhisperLogs.Accounts.Bootstrap,
       {Phoenix.PubSub, name: WhisperLogs.PubSub},
-      # ETS cache for source auth (must start before Endpoint)
-      WhisperLogs.SourceCache,
-      # Export scheduler (runs before retention to archive before deletion)
-      WhisperLogs.Exports.Scheduler,
-      # Log retention cleanup
-      WhisperLogs.Retention,
-      # Alert evaluation
-      WhisperLogs.Alerts.Evaluator,
+      {Task.Supervisor, name: WhisperLogs.Alerts.PreviewSupervisor, max_children: 2},
       # Syslog listener infrastructure
       WhisperLogs.Syslog.Supervisor,
       # Start to serve requests, typically the last entry
       WhisperLogsWeb.Endpoint
     ]
+
+    background_workers = [
+      # Export scheduler runs before retention so archival gets the first chance at data.
+      WhisperLogs.Exports.Scheduler,
+      WhisperLogs.Retention,
+      WhisperLogs.Alerts.Evaluator
+    ]
+
+    children =
+      if Application.get_env(:whisperlogs, :start_background_workers, true) do
+        Enum.drop(infrastructure, -1) ++ background_workers ++ [List.last(infrastructure)]
+      else
+        infrastructure
+      end
 
     # See https://hexdocs.pm/elixir/Supervisor.html
     # for other strategies and supported options

@@ -5,9 +5,6 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
 
   import WhisperLogs.AccountsFixtures
 
-  # The ApiAuth plug spawns an async task to update last_used_at
-  @task_completion_delay 50
-
   describe "call/2" do
     test "returns 401 when no Authorization header is present", %{conn: conn} do
       conn =
@@ -73,8 +70,6 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
       refute conn.halted
       assert conn.assigns[:http_source].id == source.id
       assert conn.assigns[:source] == "my-api-source"
-
-      Process.sleep(@task_completion_delay)
     end
 
     test "assigns correct source name from http_source", %{conn: conn} do
@@ -87,28 +82,19 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
         |> ApiAuth.call([])
 
       assert conn.assigns[:source] == "custom-source-name"
-
-      Process.sleep(@task_completion_delay)
     end
 
-    test "updates last_used_at asynchronously", %{conn: conn} do
+    test "does not mutate the authenticated source", %{conn: conn} do
       user = user_fixture()
       source = http_source_fixture(user)
-      original_last_used = source.last_used_at
+      scope = WhisperLogs.Accounts.Scope.for_user(user)
 
       conn
       |> put_req_header("authorization", "Bearer #{source.key}")
       |> ApiAuth.call([])
 
-      # Wait for async task to complete
-      Process.sleep(100)
-
-      # Reload source and verify last_used_at was updated
-      updated_source = WhisperLogs.Accounts.get_source(user, source.id)
-
-      # Either it was nil before and now set, or it's a newer timestamp
-      assert is_nil(original_last_used) or
-               DateTime.compare(updated_source.last_used_at, original_last_used) in [:gt, :eq]
+      updated_source = WhisperLogs.Accounts.get_source(scope, source.id)
+      assert updated_source.updated_at == source.updated_at
     end
 
     test "allows multiple requests with same valid token", %{conn: conn} do
@@ -124,8 +110,6 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
       refute conn1.halted
       assert conn1.assigns[:http_source].id == source.id
 
-      Process.sleep(@task_completion_delay)
-
       # Second request (new conn since conn is immutable)
       conn2 =
         build_conn()
@@ -134,8 +118,6 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
 
       refute conn2.halted
       assert conn2.assigns[:http_source].id == source.id
-
-      Process.sleep(@task_completion_delay)
     end
 
     test "rejects token from revoked source", %{conn: conn} do
@@ -143,7 +125,8 @@ defmodule WhisperLogsWeb.Plugs.ApiAuthTest do
       source = http_source_fixture(user)
 
       # Revoke the source
-      {:ok, _revoked} = WhisperLogs.Accounts.revoke_source(source)
+      scope = WhisperLogs.Accounts.Scope.for_user(user)
+      {:ok, _revoked} = WhisperLogs.Accounts.revoke_source(scope, source.id)
 
       conn =
         conn

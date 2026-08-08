@@ -3,22 +3,15 @@ defmodule WhisperLogsWeb.UserAuth do
 
   import Plug.Conn
   import Phoenix.Controller
-  import Ecto.Query
 
   alias WhisperLogs.Accounts
+  alias WhisperLogs.Accounts.User
   alias WhisperLogs.Accounts.Scope
-  alias WhisperLogs.DbAdapter
-  alias WhisperLogs.Repo
 
   # Make the remember me cookie valid for 14 days. This should match
   # the session validity setting in UserToken.
   @max_cookie_age_in_days 14
   @remember_me_cookie "_whisper_logs_web_user_remember_me"
-  @remember_me_options [
-    sign: true,
-    max_age: @max_cookie_age_in_days * 24 * 60 * 60,
-    same_site: "Lax"
-  ]
 
   # How old the session token should be before a new one is issued. When a request is made
   # with a session token older than this value, then a new session token will be created
@@ -67,34 +60,17 @@ defmodule WhisperLogsWeb.UserAuth do
 
   Will reissue the session token if it is older than the configured age.
 
-  In SQLite mode (single-user), always returns an anonymous scope that
-  bypasses authentication.
+  Both database adapters require a real session token.
   """
   def fetch_current_scope_for_user(conn, _opts) do
-    # In SQLite mode, bypass authentication entirely - single-user mode
-    if DbAdapter.sqlite?() do
-      assign(conn, :current_scope, sqlite_scope())
+    with {token, conn} <- ensure_user_token(conn),
+         {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
+      conn
+      |> assign(:current_scope, Scope.for_user(user))
+      |> maybe_reissue_user_session_token(user, token_inserted_at)
     else
-      with {token, conn} <- ensure_user_token(conn),
-           {user, token_inserted_at} <- Accounts.get_user_by_session_token(token) do
-        conn
-        |> assign(:current_scope, Scope.for_user(user))
-        |> maybe_reissue_user_session_token(user, token_inserted_at)
-      else
-        nil -> assign(conn, :current_scope, Scope.for_user(nil))
-      end
+      nil -> assign(conn, :current_scope, Scope.for_user(nil))
     end
-  end
-
-  # Returns the scope for SQLite single-user mode using the default local user
-  defp sqlite_scope do
-    %Scope{user: get_default_user()}
-  end
-
-  # Fetches the default local user for SQLite mode
-  # This user is created on startup by WhisperLogs.Release
-  defp get_default_user do
-    Repo.one!(from u in Accounts.User, where: u.email == "local@localhost", limit: 1)
   end
 
   defp ensure_user_token(conn) do
@@ -142,7 +118,10 @@ defmodule WhisperLogsWeb.UserAuth do
 
   # Do not renew session if the user is already logged in
   # to prevent CSRF errors or data being lost in tabs that are still open
-  defp renew_session(conn, user) when conn.assigns.current_scope.user.id == user.id do
+  defp renew_session(
+         %{assigns: %{current_scope: %Scope{user: %User{id: user_id}}}} = conn,
+         %User{id: user_id}
+       ) do
     conn
   end
 
@@ -181,7 +160,17 @@ defmodule WhisperLogsWeb.UserAuth do
   defp write_remember_me_cookie(conn, token) do
     conn
     |> put_session(:user_remember_me, true)
-    |> put_resp_cookie(@remember_me_cookie, token, @remember_me_options)
+    |> put_resp_cookie(@remember_me_cookie, token, remember_me_options())
+  end
+
+  defp remember_me_options do
+    [
+      sign: true,
+      max_age: @max_cookie_age_in_days * 24 * 60 * 60,
+      secure: Application.get_env(:whisperlogs, :secure_cookies, false),
+      http_only: true,
+      same_site: "Lax"
+    ]
   end
 
   defp put_token_in_session(conn, token) do
@@ -269,17 +258,12 @@ defmodule WhisperLogsWeb.UserAuth do
 
   defp mount_current_scope(socket, session) do
     Phoenix.Component.assign_new(socket, :current_scope, fn ->
-      # In SQLite mode, bypass authentication - single-user mode
-      if DbAdapter.sqlite?() do
-        sqlite_scope()
-      else
-        {user, _} =
-          if user_token = session["user_token"] do
-            Accounts.get_user_by_session_token(user_token)
-          end || {nil, nil}
+      {user, _} =
+        if user_token = session["user_token"] do
+          Accounts.get_user_by_session_token(user_token)
+        end || {nil, nil}
 
-        Scope.for_user(user)
-      end
+      Scope.for_user(user)
     end)
   end
 

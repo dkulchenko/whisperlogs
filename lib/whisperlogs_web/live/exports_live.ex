@@ -2,7 +2,7 @@ defmodule WhisperLogsWeb.ExportsLive do
   use WhisperLogsWeb, :live_view
 
   alias WhisperLogs.Exports
-  alias WhisperLogs.Exports.{ExportDestination, Exporter, S3Client}
+  alias WhisperLogs.Exports.{ExportDestination, S3Client, Workspace}
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,6 +21,7 @@ defmodule WhisperLogsWeb.ExportsLive do
      |> assign(:selected_destination, nil)
      |> assign(:testing_connection, nil)
      |> assign(:connection_result, nil)
+     |> assign(:s3_allowed_hosts, WhisperLogs.Config.s3_allowed_hosts())
      |> reset_destination_form()
      |> reset_export_form()}
   end
@@ -33,7 +34,6 @@ defmodule WhisperLogsWeb.ExportsLive do
         "name" => "",
         "destination_type" => "local",
         "enabled" => "true",
-        "local_path" => "",
         "s3_endpoint" => "",
         "s3_bucket" => "",
         "s3_region" => "",
@@ -128,15 +128,8 @@ defmodule WhisperLogsWeb.ExportsLive do
 
               <%!-- Local settings --%>
               <div :if={@destination_form[:destination_type].value == "local"}>
-                <.input
-                  field={@destination_form[:local_path]}
-                  type="text"
-                  label="Local Path"
-                  placeholder="/var/log/whisperlogs/exports"
-                  phx-debounce="300"
-                />
                 <p class="mt-1 text-sm text-text-tertiary">
-                  Directory where export files will be saved. Will be created if it doesn't exist.
+                  Files are stored in this account's application-managed export directory.
                 </p>
               </div>
 
@@ -145,10 +138,9 @@ defmodule WhisperLogsWeb.ExportsLive do
                 <div class="grid grid-cols-2 gap-4">
                   <.input
                     field={@destination_form[:s3_endpoint]}
-                    type="text"
+                    type="select"
                     label="Endpoint"
-                    placeholder="s3.amazonaws.com or s3.us-west-000.backblazeb2.com"
-                    phx-debounce="300"
+                    options={Enum.map(@s3_allowed_hosts, &{&1, &1})}
                   />
                   <.input
                     field={@destination_form[:s3_region]}
@@ -527,7 +519,6 @@ defmodule WhisperLogsWeb.ExportsLive do
       name: params["name"],
       destination_type: params["destination_type"],
       enabled: enabled,
-      local_path: params["local_path"],
       s3_endpoint: params["s3_endpoint"],
       s3_bucket: params["s3_bucket"],
       s3_region: params["s3_region"],
@@ -540,7 +531,7 @@ defmodule WhisperLogsWeb.ExportsLive do
 
     result =
       if socket.assigns.editing_destination do
-        Exports.update_export_destination(socket.assigns.editing_destination, attrs)
+        Exports.update_export_destination(scope, socket.assigns.editing_destination.id, attrs)
       else
         Exports.create_export_destination(scope, attrs)
       end
@@ -587,7 +578,6 @@ defmodule WhisperLogsWeb.ExportsLive do
           "name" => dest.name,
           "destination_type" => dest.destination_type,
           "enabled" => to_string(dest.enabled),
-          "local_path" => dest.local_path || "",
           "s3_endpoint" => dest.s3_endpoint || "",
           "s3_bucket" => dest.s3_bucket || "",
           "s3_region" => dest.s3_region || "",
@@ -614,7 +604,7 @@ defmodule WhisperLogsWeb.ExportsLive do
         {:noreply, put_flash(socket, :error, "Destination not found")}
 
       dest ->
-        case Exports.toggle_export_destination(dest) do
+        case Exports.toggle_export_destination(scope, dest.id) do
           {:ok, updated} ->
             destinations =
               Enum.map(socket.assigns.destinations, fn d ->
@@ -637,7 +627,7 @@ defmodule WhisperLogsWeb.ExportsLive do
         {:noreply, put_flash(socket, :error, "Destination not found")}
 
       dest ->
-        case Exports.delete_export_destination(dest) do
+        case Exports.delete_export_destination(scope, dest.id) do
           {:ok, _} ->
             destinations = Enum.reject(socket.assigns.destinations, &(&1.id == dest.id))
             jobs = Enum.reject(socket.assigns.jobs, &(&1.export_destination_id == dest.id))
@@ -658,11 +648,14 @@ defmodule WhisperLogsWeb.ExportsLive do
     scope = socket.assigns.current_scope
     dest_id = String.to_integer(id)
 
-    case Exports.get_export_destination(scope, dest_id) do
-      nil ->
+    case {socket.assigns.testing_connection, Exports.get_export_destination(scope, dest_id)} do
+      {testing, _destination} when not is_nil(testing) ->
+        {:noreply, put_flash(socket, :error, "A connection test is already running")}
+
+      {nil, nil} ->
         {:noreply, put_flash(socket, :error, "Destination not found")}
 
-      dest ->
+      {nil, dest} ->
         socket =
           socket
           |> assign(:testing_connection, dest_id)
@@ -708,17 +701,13 @@ defmodule WhisperLogsWeb.ExportsLive do
         to_date = Date.from_iso8601!(params["to_date"])
 
         from_timestamp = DateTime.new!(from_date, ~T[00:00:00], "Etc/UTC")
-        to_timestamp = DateTime.new!(to_date, ~T[23:59:59], "Etc/UTC")
+        to_timestamp = DateTime.new!(Date.add(to_date, 1), ~T[00:00:00], "Etc/UTC")
 
-        case Exports.create_export_job(dest, scope, %{
-               trigger: "manual",
+        case Exports.create_manual_job(scope, dest.id, %{
                from_timestamp: from_timestamp,
                to_timestamp: to_timestamp
              }) do
           {:ok, job} ->
-            # Run export async
-            Exporter.run_export_async(job)
-
             {:noreply,
              socket
              |> assign(:show_export_modal, false)
@@ -726,8 +715,8 @@ defmodule WhisperLogsWeb.ExportsLive do
              |> assign(:jobs, [job | socket.assigns.jobs])
              |> put_flash(:info, "Export started. Refresh the page to see progress.")}
 
-          {:error, changeset} ->
-            {:noreply, put_flash(socket, :error, format_errors(changeset))}
+          {:error, reason} ->
+            {:noreply, put_flash(socket, :error, format_export_error(reason))}
         end
     end
   end
@@ -737,7 +726,7 @@ defmodule WhisperLogsWeb.ExportsLive do
     {success, error} =
       case result do
         :ok -> {true, nil}
-        {:error, reason} -> {false, to_string(reason)}
+        {:error, reason} -> {false, format_connection_error(reason)}
       end
 
     {:noreply,
@@ -747,9 +736,11 @@ defmodule WhisperLogsWeb.ExportsLive do
   end
 
   defp test_destination_connection(%ExportDestination{destination_type: "local"} = dest) do
-    case File.mkdir_p(dest.local_path) do
-      :ok -> :ok
-      {:error, reason} -> {:error, "Cannot create directory: #{inspect(reason)}"}
+    try do
+      dest |> Exports.destination_path() |> Workspace.ensure_local_destination!()
+      :ok
+    rescue
+      error -> {:error, Exception.message(error)}
     end
   end
 
@@ -757,8 +748,17 @@ defmodule WhisperLogsWeb.ExportsLive do
     S3Client.test_connection(dest)
   end
 
+  defp format_connection_error(:access_denied), do: "Access denied"
+  defp format_connection_error(:bucket_not_found), do: "Bucket not found"
+  defp format_connection_error(:redirect_rejected), do: "Redirect rejected"
+  defp format_connection_error(:endpoint_not_allowlisted), do: "Endpoint is not allowlisted"
+  defp format_connection_error(:invalid_bucket), do: "Bucket name is invalid"
+  defp format_connection_error(:deadline_exceeded), do: "Connection test timed out"
+  defp format_connection_error({:s3_status, status}), do: "S3 returned status #{status}"
+  defp format_connection_error(_reason), do: "Connection test failed"
+
   defp format_destination_path(%ExportDestination{destination_type: "local"} = dest) do
-    dest.local_path || "—"
+    Exports.destination_path(dest)
   end
 
   defp format_destination_path(%ExportDestination{destination_type: "s3"} = dest) do
@@ -802,4 +802,18 @@ defmodule WhisperLogsWeb.ExportsLive do
     |> Enum.map(fn {field, messages} -> "#{field}: #{Enum.join(messages, ", ")}" end)
     |> Enum.join("; ")
   end
+
+  defp format_export_error(%Ecto.Changeset{} = changeset), do: format_errors(changeset)
+
+  defp format_export_error(:range_too_large),
+    do: "The selected range exceeds the configured maximum"
+
+  defp format_export_error(:user_pending_quota_exceeded),
+    do: "You already have the maximum number of pending exports"
+
+  defp format_export_error(:global_pending_quota_exceeded),
+    do: "The service is currently at its pending export limit"
+
+  defp format_export_error(:duplicate_active_export), do: "That export range is already pending"
+  defp format_export_error(reason), do: "Unable to create export: #{inspect(reason)}"
 end

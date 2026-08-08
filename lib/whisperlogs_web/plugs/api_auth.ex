@@ -16,9 +16,6 @@ defmodule WhisperLogsWeb.Plugs.ApiAuth do
   def call(conn, _opts) do
     with ["Bearer " <> token] <- get_req_header(conn, "authorization"),
          {:ok, http_source} <- Accounts.get_source_by_token(token) do
-      # Update last_used_at asynchronously (don't block the request)
-      Task.start(fn -> Accounts.touch_source(http_source) end)
-
       conn
       |> assign(:http_source, http_source)
       |> assign(:source, http_source.source)

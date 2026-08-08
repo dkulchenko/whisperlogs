@@ -7,7 +7,8 @@ defmodule WhisperLogs.AccountsFixtures do
   import Ecto.Query
 
   alias WhisperLogs.Accounts
-  alias WhisperLogs.Accounts.Scope
+  alias WhisperLogs.Accounts.{Scope, User}
+  alias WhisperLogs.Repo
 
   def unique_user_email, do: "user#{System.unique_integer()}@example.com"
   def valid_user_password, do: "hello world!"
@@ -23,10 +24,14 @@ defmodule WhisperLogs.AccountsFixtures do
   end
 
   def user_fixture(attrs \\ %{}) do
-    {:ok, user} =
-      attrs
-      |> valid_user_attributes()
-      |> Accounts.register_user()
+    attributes = valid_user_attributes(attrs)
+
+    changeset =
+      %User{}
+      |> User.registration_changeset(attributes)
+      |> Ecto.Changeset.put_change(:is_admin, Map.get(attributes, :is_admin, false))
+
+    {:ok, user} = Repo.insert(changeset)
 
     user
   end
@@ -80,7 +85,7 @@ defmodule WhisperLogs.AccountsFixtures do
     source = Keyword.get(attrs, :source, "test-source-#{System.unique_integer([:positive])}")
 
     {:ok, source_record} =
-      Accounts.create_http_source(user, %{
+      Accounts.create_http_source(Scope.for_user(user), %{
         name: name,
         source: source
       })
@@ -105,15 +110,15 @@ defmodule WhisperLogs.AccountsFixtures do
     source = Keyword.get(attrs, :source, "syslog-source-#{System.unique_integer([:positive])}")
     port = Keyword.get(attrs, :port) || next_test_port()
     transport = Keyword.get(attrs, :transport, "udp")
-    auto_register = Keyword.get(attrs, :auto_register_hosts, true)
+    admission_mode = Keyword.get(attrs, :admission_mode, "any")
 
     {:ok, source_record} =
-      Accounts.create_syslog_source(user, %{
+      Accounts.create_syslog_source(Scope.for_user(user), %{
         name: name,
         source: source,
         port: port,
         transport: transport,
-        auto_register_hosts: auto_register,
+        admission_mode: admission_mode,
         allowed_hosts: Keyword.get(attrs, :allowed_hosts, [])
       })
 

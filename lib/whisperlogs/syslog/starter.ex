@@ -5,8 +5,6 @@ defmodule WhisperLogs.Syslog.Starter do
   """
   use GenServer
 
-  require Logger
-
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
@@ -18,19 +16,7 @@ defmodule WhisperLogs.Syslog.Starter do
 
   @impl true
   def handle_continue(:start_listeners, state) do
-    sources = WhisperLogs.Accounts.list_syslog_sources()
-    Logger.info("Starting #{length(sources)} syslog listener(s)")
-
-    for source <- sources do
-      case WhisperLogs.Syslog.Supervisor.start_listener(source) do
-        {:ok, _pid} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.error("Failed to start syslog listener for #{source.source}: #{inspect(reason)}")
-      end
-    end
-
+    WhisperLogs.Syslog.Supervisor.start_all_listeners()
     {:noreply, state}
   end
 end

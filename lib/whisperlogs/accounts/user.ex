@@ -6,7 +6,6 @@ defmodule WhisperLogs.Accounts.User do
     field :email, :string
     field :password, :string, virtual: true, redact: true
     field :hashed_password, :string, redact: true
-    field :confirmed_at, :utc_datetime
     field :authenticated_at, :utc_datetime, virtual: true
     field :is_admin, :boolean, default: false
 
@@ -123,14 +122,6 @@ defmodule WhisperLogs.Accounts.User do
     else
       changeset
     end
-  end
-
-  @doc """
-  Confirms the account by setting `confirmed_at`.
-  """
-  def confirm_changeset(user) do
-    now = DateTime.utc_now(:second)
-    change(user, confirmed_at: now)
   end
 
   @doc """

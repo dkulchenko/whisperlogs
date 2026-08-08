@@ -103,21 +103,26 @@ defmodule WhisperLogs.Syslog.Parser do
     case Regex.run(~r/^<(\d{1,3})>(.*)$/s, message) do
       [_, pri_str, rest] ->
         pri = String.to_integer(pri_str)
-        {facility, severity} = decode_pri(pri)
 
-        {timestamp, hostname, msg} = parse_bsd_header(rest)
+        if pri > 191 do
+          {:error, :invalid_priority}
+        else
+          {facility, severity} = decode_pri(pri)
 
-        {:ok,
-         %{
-           "timestamp" => timestamp || DateTime.utc_now() |> DateTime.to_iso8601(),
-           "level" => severity,
-           "message" => msg,
-           "metadata" => %{
-             "facility" => facility,
-             "hostname" => hostname,
-             "format" => "rfc3164"
-           }
-         }}
+          {timestamp, hostname, msg} = parse_bsd_header(rest)
+
+          {:ok,
+           %{
+             "timestamp" => timestamp || DateTime.utc_now() |> DateTime.to_iso8601(),
+             "level" => severity,
+             "message" => msg,
+             "metadata" => %{
+               "facility" => facility,
+               "hostname" => hostname,
+               "format" => "rfc3164"
+             }
+           }}
+        end
 
       _ ->
         {:error, :parse_failed}
@@ -133,26 +138,31 @@ defmodule WhisperLogs.Syslog.Parser do
     case Regex.run(regex, message) do
       [_, pri_str, _version, timestamp, hostname, appname, procid, _msgid, sd, msg] ->
         pri = String.to_integer(pri_str)
-        {facility, severity} = decode_pri(pri)
 
-        metadata =
-          %{
-            "facility" => facility,
-            "hostname" => nilify(hostname),
-            "appname" => nilify(appname),
-            "procid" => nilify(procid),
-            "format" => "rfc5424"
-          }
-          |> maybe_add_structured_data(sd)
-          |> reject_nils()
+        if pri > 191 do
+          {:error, :invalid_priority}
+        else
+          {facility, severity} = decode_pri(pri)
 
-        {:ok,
-         %{
-           "timestamp" => parse_rfc5424_timestamp(timestamp),
-           "level" => severity,
-           "message" => msg,
-           "metadata" => metadata
-         }}
+          metadata =
+            %{
+              "facility" => facility,
+              "hostname" => nilify(hostname),
+              "appname" => nilify(appname),
+              "procid" => nilify(procid),
+              "format" => "rfc5424"
+            }
+            |> maybe_add_structured_data(sd)
+            |> reject_nils()
+
+          {:ok,
+           %{
+             "timestamp" => parse_rfc5424_timestamp(timestamp),
+             "level" => severity,
+             "message" => msg,
+             "metadata" => metadata
+           }}
+        end
 
       _ ->
         {:error, :parse_failed}

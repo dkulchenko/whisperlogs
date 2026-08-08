@@ -4,16 +4,13 @@ defmodule WhisperLogsWeb.Endpoint do
   # The session will be stored in the cookie and signed,
   # this means its contents can be read but not tampered with.
   # Set :encryption_salt if you would also like to encrypt it.
-  @session_options [
-    store: :cookie,
-    key: "_whisperlogs_key",
-    signing_salt: "FVIHYGtG",
-    same_site: "Lax"
-  ]
-
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [session: @session_options]],
-    longpoll: [connect_info: [session: @session_options]]
+    websocket: [
+      connect_info: [session: WhisperLogsWeb.Plugs.RuntimeSession.verification_options()]
+    ],
+    longpoll: [
+      connect_info: [session: WhisperLogsWeb.Plugs.RuntimeSession.verification_options()]
+    ]
 
   # Serve at "/" the static files from "priv/static" directory.
   #
@@ -43,14 +40,16 @@ defmodule WhisperLogsWeb.Endpoint do
 
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
+  plug WhisperLogsWeb.Plugs.RuntimeRequestLimit
 
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
+    body_reader: {WhisperLogsWeb.Plugs.RuntimeBodyReader, :read_body, []},
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride
   plug Plug.Head
-  plug Plug.Session, @session_options
+  plug WhisperLogsWeb.Plugs.RuntimeSession
   plug WhisperLogsWeb.Router
 end

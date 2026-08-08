@@ -14,9 +14,8 @@ defmodule WhisperLogs.Exports.ExporterTest do
   describe "local destination export" do
     test "exports logs to gzipped JSONL file" do
       scope = user_scope_fixture()
-      export_dir = Path.join(System.tmp_dir!(), "export_test_#{System.unique_integer()}")
-
-      destination = local_destination_fixture(scope, local_path: export_dir)
+      destination = local_destination_fixture(scope)
+      export_dir = Exports.destination_path(destination)
 
       # Create some logs
       for i <- 1..5 do
@@ -28,8 +27,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
       from = DateTime.add(now, -1, :hour)
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: from,
           to_timestamp: now
         })
@@ -71,17 +69,15 @@ defmodule WhisperLogs.Exports.ExporterTest do
 
     test "exports empty file when no logs match time range" do
       scope = user_scope_fixture()
-      export_dir = Path.join(System.tmp_dir!(), "export_test_#{System.unique_integer()}")
-
-      destination = local_destination_fixture(scope, local_path: export_dir)
+      destination = local_destination_fixture(scope)
+      export_dir = Exports.destination_path(destination)
 
       # Create job for a time range with no logs
       now = DateTime.utc_now()
       future = DateTime.add(now, 1, :hour)
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: now,
           to_timestamp: future
         })
@@ -96,45 +92,17 @@ defmodule WhisperLogs.Exports.ExporterTest do
       File.rm_rf!(export_dir)
     end
 
-    test "handles invalid local path by failing" do
-      scope = user_scope_fixture()
-      # Use an invalid path that can't be created
-      invalid_path = "/root/definitely/cannot/create/this"
-
-      destination = local_destination_fixture(scope, local_path: invalid_path)
-
-      {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
-          from_timestamp: DateTime.add(DateTime.utc_now(), -1, :hour),
-          to_timestamp: DateTime.utc_now()
-        })
-
-      log =
-        capture_log(fn ->
-          Exporter.run_export(job)
-        end)
-
-      assert log =~ "failed to upload"
-
-      updated_job = Exports.get_export_job(scope, job.id)
-      assert updated_job.status == "failed"
-      assert updated_job.error_message != nil
-    end
-
     test "generates proper filename based on date range" do
       scope = user_scope_fixture()
-      export_dir = Path.join(System.tmp_dir!(), "export_test_#{System.unique_integer()}")
-
-      destination = local_destination_fixture(scope, local_path: export_dir)
+      destination = local_destination_fixture(scope)
+      export_dir = Exports.destination_path(destination)
 
       # Use specific dates
       from = ~U[2024-01-15 00:00:00Z]
       to = ~U[2024-01-20 23:59:59Z]
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: from,
           to_timestamp: to
         })
@@ -142,7 +110,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
       Exporter.run_export(job)
 
       updated_job = Exports.get_export_job(scope, job.id)
-      assert updated_job.file_name == "whisperlogs_20240115_to_20240120.jsonl.gz"
+      assert updated_job.file_name == "whisperlogs_20240115_to_20240120_#{job.id}.jsonl.gz"
 
       # Clean up
       File.rm_rf!(export_dir)
@@ -174,8 +142,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
       now = DateTime.utc_now()
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: DateTime.add(now, -1, :hour),
           to_timestamp: now
         })
@@ -200,8 +167,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
       destination = s3_destination_fixture(scope)
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: DateTime.add(DateTime.utc_now(), -1, :hour),
           to_timestamp: DateTime.utc_now()
         })
@@ -214,7 +180,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
           Exporter.run_export(job)
         end)
 
-      assert log =~ "failed to upload"
+      assert log =~ "S3 upload failed"
 
       updated_job = Exports.get_export_job(scope, job.id)
       assert updated_job.status == "failed"
@@ -236,8 +202,7 @@ defmodule WhisperLogs.Exports.ExporterTest do
       log_fixture("test-source", level: "info", message: "Test log")
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: DateTime.add(DateTime.utc_now(), -1, :hour),
           to_timestamp: DateTime.utc_now()
         })
@@ -251,43 +216,14 @@ defmodule WhisperLogs.Exports.ExporterTest do
     end
   end
 
-  describe "run_export_async/1" do
-    test "runs export in background task" do
-      scope = user_scope_fixture()
-      export_dir = Path.join(System.tmp_dir!(), "export_test_#{System.unique_integer()}")
-
-      destination = local_destination_fixture(scope, local_path: export_dir)
-
-      {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
-          from_timestamp: DateTime.add(DateTime.utc_now(), -1, :hour),
-          to_timestamp: DateTime.utc_now()
-        })
-
-      {:ok, _task_pid} = Exporter.run_export_async(job)
-
-      # Wait for async task to complete
-      Process.sleep(500)
-
-      updated_job = Exports.get_export_job(scope, job.id)
-      assert updated_job.status in ["running", "completed"]
-
-      # Clean up
-      File.rm_rf!(export_dir)
-    end
-  end
-
   describe "job status updates" do
     test "sets status to running before starting" do
       scope = user_scope_fixture()
-      export_dir = Path.join(System.tmp_dir!(), "export_test_#{System.unique_integer()}")
-
-      destination = local_destination_fixture(scope, local_path: export_dir)
+      destination = local_destination_fixture(scope)
+      export_dir = Exports.destination_path(destination)
 
       {:ok, job} =
-        Exports.create_export_job(destination, scope, %{
-          trigger: "manual",
+        Exports.create_manual_job(scope, destination.id, %{
           from_timestamp: DateTime.add(DateTime.utc_now(), -1, :hour),
           to_timestamp: DateTime.utc_now()
         })

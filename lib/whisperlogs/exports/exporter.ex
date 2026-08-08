@@ -1,139 +1,149 @@
 defmodule WhisperLogs.Exports.Exporter do
-  @moduledoc """
-  Handles the actual export process - streaming logs to gzipped JSONL
-  and uploading to the destination.
-  """
-
+  @moduledoc "Runs one bounded export job synchronously."
   require Logger
 
   alias WhisperLogs.Exports
-  alias WhisperLogs.Exports.{ExportDestination, ExportJob}
+  alias WhisperLogs.Exports.{ExportDestination, ExportJob, Workspace}
   alias WhisperLogs.Repo
 
-  # Use configurable S3 client for testability
-  defp s3_client do
-    Application.get_env(:whisperlogs, :s3_client, WhisperLogs.Exports.S3Client)
-  end
-
-  @doc """
-  Executes an export job.
-
-  1. Updates job status to "running"
-  2. Streams logs from database
-  3. Writes to gzipped JSONL format
-  4. Uploads to destination (local or S3)
-  5. Updates job with results
-  """
-  def run_export(%ExportJob{} = job) do
-    job = Repo.preload(job, :export_destination)
-    destination = job.export_destination
+  def run_export(%ExportJob{} = original_job) do
+    job = Repo.preload(original_job, :export_destination)
+    limits = WhisperLogs.Config.export_limits()
+    deadline = System.monotonic_time(:millisecond) + limits.timeout_seconds * 1_000
+    workspace = Workspace.create!(job.id)
 
     try do
       {:ok, job} =
-        Exports.update_export_job(job, %{
-          status: "running",
-          started_at: DateTime.utc_now()
-        })
+        Exports.update_export_job(job, %{status: "running", started_at: DateTime.utc_now()})
 
-      file_name = generate_filename(job.from_timestamp, job.to_timestamp)
-      temp_path = Path.join(System.tmp_dir!(), file_name)
+      filename = filename(job)
+      {file, path} = Workspace.create_archive!(workspace, filename)
+      {count, size} = write_archive(file, path, job, limits, deadline)
+      :ok = upload(job.export_destination, path, filename, deadline)
 
-      # Stream logs and write to gzipped JSONL
-      {log_count, file_size} = stream_to_gzipped_jsonl(job, temp_path)
-
-      # Upload to destination
-      case upload_to_destination(destination, temp_path, file_name) do
-        :ok ->
-          Exports.update_export_job(job, %{
-            status: "completed",
-            completed_at: DateTime.utc_now(),
-            file_name: file_name,
-            file_size_bytes: file_size,
-            log_count: log_count
-          })
-
-          Logger.info(
-            "Export job #{job.id} completed: #{log_count} logs, #{format_bytes(file_size)}"
-          )
-
-        {:error, reason} ->
-          Exports.update_export_job(job, %{
-            status: "failed",
-            completed_at: DateTime.utc_now(),
-            error_message: to_string(reason)
-          })
-
-          Logger.error("Export job #{job.id} failed to upload: #{inspect(reason)}")
-      end
-
-      # Clean up temp file
-      File.rm(temp_path)
+      Exports.update_export_job(job, %{
+        status: "completed",
+        completed_at: DateTime.utc_now(),
+        file_name: filename,
+        file_size_bytes: size,
+        log_count: count,
+        error_message: nil
+      })
     rescue
       error ->
-        Logger.error("Export job #{job.id} failed: #{Exception.message(error)}")
+        reason = stable_error(error)
+        Logger.error("Export job #{job.id} failed: #{reason}")
 
         Exports.update_export_job(job, %{
           status: "failed",
           completed_at: DateTime.utc_now(),
-          error_message: Exception.message(error)
+          error_message: reason
         })
+    after
+      Workspace.cleanup(workspace)
     end
   end
 
-  @doc """
-  Runs an export job asynchronously in a new process.
-  """
-  def run_export_async(%ExportJob{} = job) do
-    Task.start(fn -> run_export(job) end)
-  end
-
-  defp generate_filename(from, to) do
-    from_str = Calendar.strftime(from, "%Y%m%d")
-    to_str = Calendar.strftime(to, "%Y%m%d")
-    "whisperlogs_#{from_str}_to_#{to_str}.jsonl.gz"
-  end
-
-  defp stream_to_gzipped_jsonl(job, temp_path) do
-    # Open file with gzip compression
-    {:ok, file} = :file.open(temp_path, [:write, :binary])
+  defp write_archive(file, path, job, limits, deadline) do
     z = :zlib.open()
     :ok = :zlib.deflateInit(z, :default, :deflated, 31, 8, :default)
 
-    log_count =
-      Repo.transaction(
-        fn ->
-          Exports.stream_logs_for_export(job.from_timestamp, job.to_timestamp)
-          |> Enum.reduce(0, fn log, count ->
-            json_line = Jason.encode!(log_to_map(log)) <> "\n"
-            compressed = :zlib.deflate(z, json_line)
-            :file.write(file, compressed)
-            count + 1
-          end)
-        end,
-        timeout: :infinity
-      )
+    result =
+      try do
+        enforce_deadline!(deadline)
 
-    # Finalize compression
-    final = :zlib.deflate(z, "", :finish)
-    :file.write(file, final)
-    :zlib.deflateEnd(z)
-    :zlib.close(z)
-    :file.close(file)
-
-    file_size =
-      case File.stat(temp_path) do
-        {:ok, %{size: size}} -> size
-        _ -> 0
+        Repo.transaction(
+          fn ->
+            Exports.stream_logs_for_export(job.from_timestamp, job.to_timestamp, job.trigger)
+            |> Enum.reduce(0, fn log, count ->
+              enforce_deadline!(deadline)
+              if count >= limits.max_rows, do: raise("export row limit exceeded")
+              line = Jason.encode!(log_to_map(log)) <> "\n"
+              :ok = write_compressed(file, :zlib.deflate(z, line))
+              enforce_size!(path, limits.max_compressed_bytes)
+              count + 1
+            end)
+          end,
+          timeout: positive_remaining(deadline)
+        )
+      after
+        :ok = write_compressed(file, :zlib.deflate(z, "", :finish))
+        :zlib.deflateEnd(z)
+        :zlib.close(z)
+        :ok = File.close(file)
       end
 
-    case log_count do
-      {:ok, count} -> {count, file_size}
-      count when is_integer(count) -> {count, file_size}
+    count =
+      case result do
+        {:ok, value} -> value
+        {:error, reason} -> raise "database export failed: #{inspect(reason)}"
+      end
+
+    size = File.stat!(path).size
+    if size > limits.max_compressed_bytes, do: raise("export compressed-byte limit exceeded")
+    {count, size}
+  end
+
+  defp write_compressed(file, data) do
+    :ok = IO.binwrite(file, data)
+  end
+
+  defp enforce_size!(path, max) do
+    if File.stat!(path).size > max, do: raise("export compressed-byte limit exceeded")
+  end
+
+  defp upload(
+         %ExportDestination{destination_type: "local"} = destination,
+         path,
+         filename,
+         deadline
+       ) do
+    target_dir =
+      destination |> Exports.destination_path() |> Workspace.ensure_local_destination!()
+
+    target = Path.join(target_dir, filename)
+    {:ok, output} = File.open(target, [:write, :binary, :exclusive])
+    :ok = File.chmod(target, 0o600)
+
+    try do
+      try do
+        source = File.open!(path, [:read, :binary])
+
+        try do
+          copy_bounded(source, output, deadline)
+        after
+          File.close(source)
+        end
+      after
+        File.close(output)
+      end
+    rescue
+      error ->
+        File.rm(target)
+        reraise error, __STACKTRACE__
     end
   end
 
-  defp log_to_map(log) do
-    %{
+  defp upload(%ExportDestination{destination_type: "s3"} = destination, path, filename, deadline) do
+    key =
+      if destination.s3_prefix in [nil, ""],
+        do: filename,
+        else: "#{String.trim(destination.s3_prefix, "/")}/#{filename}"
+
+    client = Application.get_env(:whisperlogs, :s3_client, WhisperLogs.Exports.S3Client)
+
+    case client.upload_file(destination, key, path, deadline) do
+      :ok -> :ok
+      {:error, reason} -> raise "S3 upload failed: #{inspect(reason)}"
+    end
+  end
+
+  defp filename(job),
+    do:
+      "whisperlogs_#{Calendar.strftime(job.from_timestamp, "%Y%m%d")}_to_#{Calendar.strftime(job.to_timestamp, "%Y%m%d")}_#{job.id}.jsonl.gz"
+
+  defp log_to_map(log),
+    do: %{
       id: log.id,
       timestamp: DateTime.to_iso8601(log.timestamp),
       level: log.level,
@@ -142,46 +152,27 @@ defmodule WhisperLogs.Exports.Exporter do
       source: log.source,
       inserted_at: DateTime.to_iso8601(log.inserted_at)
     }
-  end
 
-  defp upload_to_destination(
-         %ExportDestination{destination_type: "local"} = dest,
-         temp_path,
-         file_name
-       ) do
-    target_dir = dest.local_path
-    target_path = Path.join(target_dir, file_name)
+  defp enforce_deadline!(deadline),
+    do: if(remaining(deadline) <= 0, do: raise("export deadline exceeded"), else: :ok)
 
-    case File.mkdir_p(target_dir) do
-      :ok ->
-        case File.cp(temp_path, target_path) do
-          :ok -> :ok
-          {:error, reason} -> {:error, "Failed to copy file: #{inspect(reason)}"}
-        end
+  defp copy_bounded(source, output, deadline) do
+    enforce_deadline!(deadline)
+
+    case IO.binread(source, 1_048_576) do
+      :eof ->
+        :ok
 
       {:error, reason} ->
-        {:error, "Failed to create directory: #{inspect(reason)}"}
+        raise "local export read failed: #{inspect(reason)}"
+
+      chunk ->
+        :ok = IO.binwrite(output, chunk)
+        copy_bounded(source, output, deadline)
     end
   end
 
-  defp upload_to_destination(
-         %ExportDestination{destination_type: "s3"} = dest,
-         temp_path,
-         file_name
-       ) do
-    key =
-      if dest.s3_prefix && dest.s3_prefix != "" do
-        "#{dest.s3_prefix}/#{file_name}"
-      else
-        file_name
-      end
-
-    body = File.read!(temp_path)
-
-    s3_client().put_object(dest, key, body, content_type: "application/gzip")
-  end
-
-  defp format_bytes(bytes) when bytes < 1024, do: "#{bytes} B"
-  defp format_bytes(bytes) when bytes < 1_048_576, do: "#{Float.round(bytes / 1024, 1)} KB"
-  defp format_bytes(bytes), do: "#{Float.round(bytes / 1_048_576, 1)} MB"
+  defp remaining(deadline), do: deadline - System.monotonic_time(:millisecond)
+  defp positive_remaining(deadline), do: max(remaining(deadline), 1)
+  defp stable_error(error), do: error |> Exception.message() |> String.slice(0, 500)
 end

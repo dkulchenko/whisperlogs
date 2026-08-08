@@ -12,6 +12,11 @@ defmodule WhisperLogs.RetentionTest do
   import WhisperLogs.ExportsFixtures
   import WhisperLogs.LogsFixtures
 
+  setup do
+    start_supervised!(Retention)
+    :ok
+  end
+
   # Helper to trigger cleanup manually
   defp trigger_cleanup do
     send(Retention, :cleanup)
@@ -23,6 +28,11 @@ defmodule WhisperLogs.RetentionTest do
       # Create old log (way outside retention period)
       old_time = DateTime.add(DateTime.utc_now(), -60, :day)
       old_log = log_fixture("test-source", level: "info", message: "Old log", timestamp: old_time)
+
+      Repo.update_all(
+        from(l in Logs.Log, where: l.id == ^old_log.id),
+        set: [inserted_at: old_time]
+      )
 
       # Create recent log (within retention period)
       recent_log = log_fixture("test-source", level: "info", message: "Recent log")
@@ -48,6 +58,16 @@ defmodule WhisperLogs.RetentionTest do
 
       log_20 = log_fixture("test-source", timestamp: time_20_days_ago)
       log_10 = log_fixture("test-source", timestamp: time_10_days_ago)
+
+      Repo.update_all(
+        from(l in Logs.Log, where: l.id == ^log_20.id),
+        set: [inserted_at: time_20_days_ago]
+      )
+
+      Repo.update_all(
+        from(l in Logs.Log, where: l.id == ^log_10.id),
+        set: [inserted_at: time_10_days_ago]
+      )
 
       # Delete logs older than 15 days
       cutoff = DateTime.add(DateTime.utc_now(), -15, :day)
@@ -125,7 +145,7 @@ defmodule WhisperLogs.RetentionTest do
       trigger_cleanup()
 
       # Check history count - should only have recent one
-      history = Alerts.list_alert_history(alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), alert.id)
       assert length(history) == 1
     end
 
@@ -145,7 +165,7 @@ defmodule WhisperLogs.RetentionTest do
       trigger_cleanup()
 
       # History should still exist
-      history_list = Alerts.list_alert_history(alert)
+      history_list = Alerts.list_alert_history(user_scope_fixture(user), alert.id)
       assert length(history_list) == 1
     end
   end
@@ -191,7 +211,7 @@ defmodule WhisperLogs.RetentionTest do
 
   describe "cleanup scheduling" do
     test "schedules periodic cleanup" do
-      # The Retention GenServer is already running, just verify it handles the cleanup message
+      # The supervised process exposes its configured state.
       state_before = :sys.get_state(Retention)
       assert is_map(state_before)
       assert Map.has_key?(state_before, :retention_days)

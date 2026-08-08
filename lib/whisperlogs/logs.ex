@@ -18,51 +18,171 @@ defmodule WhisperLogs.Logs do
   @doc """
   Inserts a batch of logs for a given source.
 
-  Returns `{count, nil}` where count is the number of inserted logs.
+  Validates the complete batch before inserting anything.
   """
   def insert_batch(source, logs) when is_binary(source) and is_list(logs) do
-    now = DateTime.utc_now()
+    observed_at = DateTime.utc_now() |> DateTime.truncate(:microsecond)
 
-    entries =
-      Enum.map(logs, fn log ->
-        base_metadata = log["metadata"] || %{}
+    with :ok <- validate_batch_size(logs),
+         {:ok, entries} <- validate_events(logs, source, observed_at) do
+      {_count, inserted} =
+        Repo.insert_all(Log, entries,
+          returning: [
+            :id,
+            :timestamp,
+            :level,
+            :message,
+            :metadata,
+            :source,
+            :inserted_at
+          ]
+        )
 
-        metadata =
-          if request_id = log["request_id"] do
-            Map.put(base_metadata, "request_id", request_id)
-          else
-            base_metadata
-          end
+      broadcast({:new_logs, inserted})
+      {:ok, inserted}
+    end
+  end
 
-        %{
-          timestamp: parse_timestamp(log["timestamp"]) || now,
-          level: normalize_level(log["level"]),
-          message: log["message"] || "",
-          metadata: metadata,
-          source: source,
-          inserted_at: now
-        }
-      end)
+  def insert_batch(_source, _logs), do: {:error, %{field: :logs, reason: :invalid_batch}}
 
-    {count, inserted} =
-      Repo.insert_all(Log, entries,
-        returning: [
-          :id,
-          :timestamp,
-          :level,
-          :message,
-          :metadata,
-          :source,
-          :inserted_at
-        ]
-      )
+  defp validate_batch_size(logs) do
+    max_batch_size = WhisperLogs.Config.receiver_limits().max_batch_size
 
-    # Broadcast each log for real-time updates
-    Enum.each(inserted, fn log ->
-      broadcast({:new_log, log})
+    cond do
+      logs == [] -> {:error, %{field: :logs, reason: :empty}}
+      length(logs) > max_batch_size -> {:error, %{field: :logs, reason: :too_many}}
+      true -> :ok
+    end
+  end
+
+  defp validate_events(logs, source, observed_at) do
+    logs
+    |> Enum.with_index()
+    |> Enum.reduce_while({:ok, []}, fn {event, index}, {:ok, entries} ->
+      case validate_event(event, source, observed_at) do
+        {:ok, entry} -> {:cont, {:ok, [entry | entries]}}
+        {:error, error} -> {:halt, {:error, Map.put(error, :index, index)}}
+      end
     end)
+    |> case do
+      {:ok, entries} -> {:ok, Enum.reverse(entries)}
+      error -> error
+    end
+  end
 
-    {count, nil}
+  defp validate_event(event, source, observed_at) when is_map(event) do
+    limits = WhisperLogs.Config.receiver_limits()
+
+    with :ok <- encoded_limit(event, limits.max_event_bytes, :event),
+         {:ok, timestamp} <- event_timestamp(Map.get(event, "timestamp"), observed_at),
+         {:ok, level} <- event_level(Map.get(event, "level")),
+         {:ok, message} <- event_message(Map.get(event, "message"), limits),
+         {:ok, metadata} <- event_metadata(event, limits),
+         entry = %{
+           timestamp: timestamp,
+           level: level,
+           message: message,
+           metadata: metadata,
+           source: source,
+           inserted_at: observed_at
+         },
+         :ok <- encoded_limit(entry, limits.max_event_bytes, :event) do
+      {:ok, entry}
+    end
+  end
+
+  defp validate_event(_event, _source, _observed_at),
+    do: {:error, %{field: :event, reason: :not_an_object}}
+
+  defp event_timestamp(nil, observed_at), do: {:ok, observed_at}
+
+  defp event_timestamp(timestamp, _observed_at) when is_binary(timestamp) do
+    case DateTime.from_iso8601(timestamp) do
+      {:ok, datetime, _offset} -> {:ok, DateTime.truncate(datetime, :microsecond)}
+      _error -> {:error, %{field: :timestamp, reason: :invalid_rfc3339}}
+    end
+  end
+
+  defp event_timestamp(_timestamp, _observed_at),
+    do: {:error, %{field: :timestamp, reason: :invalid_type}}
+
+  defp event_level(nil), do: {:ok, "info"}
+  defp event_level("warn"), do: {:ok, "warning"}
+  defp event_level(level) when level in ~w(debug info warning error), do: {:ok, level}
+
+  defp event_level(level) when is_binary(level),
+    do: {:error, %{field: :level, reason: :invalid_value}}
+
+  defp event_level(_level), do: {:error, %{field: :level, reason: :invalid_type}}
+
+  defp event_message(nil, _limits), do: {:ok, ""}
+
+  defp event_message(message, limits) when is_binary(message) do
+    cond do
+      not String.valid?(message) ->
+        {:error, %{field: :message, reason: :invalid_utf8}}
+
+      byte_size(message) > limits.max_message_bytes ->
+        {:error, %{field: :message, reason: :too_large}}
+
+      true ->
+        {:ok, message}
+    end
+  end
+
+  defp event_message(_message, _limits),
+    do: {:error, %{field: :message, reason: :invalid_type}}
+
+  defp event_metadata(event, limits) do
+    metadata = Map.get(event, "metadata") || %{}
+    request_id = Map.get(event, "request_id")
+
+    cond do
+      not is_map(metadata) ->
+        {:error, %{field: :metadata, reason: :not_an_object}}
+
+      not is_nil(request_id) and not is_binary(request_id) ->
+        {:error, %{field: :request_id, reason: :invalid_type}}
+
+      is_binary(request_id) and not String.valid?(request_id) ->
+        {:error, %{field: :request_id, reason: :invalid_utf8}}
+
+      true ->
+        metadata = if request_id, do: Map.put(metadata, "request_id", request_id), else: metadata
+
+        with :ok <- validate_depth(metadata, limits.max_metadata_depth),
+             :ok <- encoded_limit(metadata, limits.max_metadata_bytes, :metadata) do
+          {:ok, metadata}
+        end
+    end
+  end
+
+  defp validate_depth(value, max_depth) do
+    if json_depth(value) <= max_depth do
+      :ok
+    else
+      {:error, %{field: :metadata, reason: :too_deep}}
+    end
+  end
+
+  defp json_depth(value) when is_map(value) do
+    child_depth = value |> Map.values() |> Enum.map(&json_depth/1) |> Enum.max(fn -> 0 end)
+    1 + child_depth
+  end
+
+  defp json_depth(value) when is_list(value) do
+    child_depth = value |> Enum.map(&json_depth/1) |> Enum.max(fn -> 0 end)
+    1 + child_depth
+  end
+
+  defp json_depth(_value), do: 0
+
+  defp encoded_limit(value, max_bytes, field) do
+    size = value |> Jason.encode_to_iodata!() |> IO.iodata_length()
+
+    if size <= max_bytes,
+      do: :ok,
+      else: {:error, %{field: field, reason: :too_large}}
   end
 
   @doc """
@@ -83,7 +203,7 @@ defmodule WhisperLogs.Logs do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> order_by([l], desc: l.timestamp, desc: l.id)
+    |> order_by([l], desc: l.inserted_at, desc: l.id)
     |> apply_filters(opts)
     |> limit(^limit)
     |> Repo.all()
@@ -93,15 +213,15 @@ defmodule WhisperLogs.Logs do
   Lists logs older than the given cursor.
   Used for infinite scroll - loading older logs when scrolling up.
 
-  Cursor is a tuple `{timestamp, id}` for stable pagination.
+  Cursor is an observed-time tuple `{inserted_at, id}` for stable pagination.
   Returns logs in descending order (newest first within batch).
   """
-  def list_logs_before({timestamp, id}, opts \\ []) do
+  def list_logs_before({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id < ^id))
-    |> order_by([l], desc: l.timestamp, desc: l.id)
+    |> where([l], l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id))
+    |> order_by([l], desc: l.inserted_at, desc: l.id)
     |> apply_filters(opts)
     |> limit(^limit)
     |> Repo.all()
@@ -111,15 +231,15 @@ defmodule WhisperLogs.Logs do
   Lists logs newer than the given cursor.
   Used for infinite scroll - loading newer logs when scrolling down.
 
-  Cursor is a tuple `{timestamp, id}` for stable pagination.
+  Cursor is an observed-time tuple `{inserted_at, id}` for stable pagination.
   Returns logs in ascending order (oldest first within batch).
   """
-  def list_logs_after({timestamp, id}, opts \\ []) do
+  def list_logs_after({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
-    |> order_by([l], asc: l.timestamp, asc: l.id)
+    |> where([l], l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id))
+    |> order_by([l], asc: l.inserted_at, asc: l.id)
     |> apply_filters(opts)
     |> limit(^limit)
     |> Repo.all()
@@ -129,17 +249,20 @@ defmodule WhisperLogs.Logs do
   Lists logs around a specific log entry for context viewing.
   Returns logs centered around the target, with half before and half after.
 
-  Cursor is a tuple `{timestamp, id}` for the target log.
+  Cursor is an observed-time tuple `{inserted_at, id}` for the target log.
   """
-  def list_logs_around({timestamp, id}, opts \\ []) do
+  def list_logs_around({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
     half = div(limit, 2)
 
     # Get logs before (including target), descending then reverse
     before_logs =
       Log
-      |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id <= ^id))
-      |> order_by([l], desc: l.timestamp, desc: l.id)
+      |> where(
+        [l],
+        l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id <= ^id)
+      )
+      |> order_by([l], desc: l.inserted_at, desc: l.id)
       |> limit(^half)
       |> Repo.all()
       |> Enum.reverse()
@@ -147,8 +270,11 @@ defmodule WhisperLogs.Logs do
     # Get logs after target (excluding target), ascending
     after_logs =
       Log
-      |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
-      |> order_by([l], asc: l.timestamp, asc: l.id)
+      |> where(
+        [l],
+        l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id)
+      )
+      |> order_by([l], asc: l.inserted_at, asc: l.id)
       |> limit(^half)
       |> Repo.all()
 
@@ -158,9 +284,9 @@ defmodule WhisperLogs.Logs do
   @doc """
   Checks if logs exist before the given cursor.
   """
-  def has_logs_before?({timestamp, id}, opts \\ []) do
+  def has_logs_before?({inserted_at, id}, opts \\ []) do
     Log
-    |> where([l], l.timestamp < ^timestamp or (l.timestamp == ^timestamp and l.id < ^id))
+    |> where([l], l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id))
     |> apply_filters(opts)
     |> limit(1)
     |> Repo.exists?()
@@ -169,9 +295,9 @@ defmodule WhisperLogs.Logs do
   @doc """
   Checks if logs exist after the given cursor.
   """
-  def has_logs_after?({timestamp, id}, opts \\ []) do
+  def has_logs_after?({inserted_at, id}, opts \\ []) do
     Log
-    |> where([l], l.timestamp > ^timestamp or (l.timestamp == ^timestamp and l.id > ^id))
+    |> where([l], l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id))
     |> apply_filters(opts)
     |> limit(1)
     |> Repo.exists?()
@@ -187,11 +313,11 @@ defmodule WhisperLogs.Logs do
   end
 
   defp filter_time_range(query, nil, nil), do: query
-  defp filter_time_range(query, from, nil), do: where(query, [l], l.timestamp >= ^from)
-  defp filter_time_range(query, nil, to), do: where(query, [l], l.timestamp <= ^to)
+  defp filter_time_range(query, from, nil), do: where(query, [l], l.inserted_at >= ^from)
+  defp filter_time_range(query, nil, to), do: where(query, [l], l.inserted_at <= ^to)
 
   defp filter_time_range(query, from, to),
-    do: where(query, [l], l.timestamp >= ^from and l.timestamp <= ^to)
+    do: where(query, [l], l.inserted_at >= ^from and l.inserted_at <= ^to)
 
   defp filter_levels(query, nil), do: query
   defp filter_levels(query, []), do: where(query, false)
@@ -238,7 +364,7 @@ defmodule WhisperLogs.Logs do
 
       {:ok, tokens} ->
         Log
-        |> where([l], l.timestamp >= ^cutoff)
+        |> where([l], l.inserted_at >= ^cutoff)
         |> apply_search_tokens(tokens)
         |> Repo.aggregate(:count, :id)
     end
@@ -246,12 +372,46 @@ defmodule WhisperLogs.Logs do
 
   def count_matches(_, _), do: 0
 
+  @doc "Returns 1h, 24h, and 7d observed-time counts in one query."
+  def preview_counts(search_query) when is_binary(search_query) do
+    now = DateTime.utc_now()
+    hour = DateTime.add(now, -3600, :second)
+    day = DateTime.add(now, -86_400, :second)
+    week = DateTime.add(now, -604_800, :second)
+
+    case SearchParser.parse(search_query) do
+      {:ok, [_ | _] = tokens} ->
+        {hour_count, day_count, week_count} =
+          Log
+          |> where([l], l.inserted_at >= ^week)
+          |> apply_search_tokens(tokens)
+          |> select([l], {
+            fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^hour),
+            fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^day),
+            count(l.id)
+          })
+          |> Repo.one(timeout: WhisperLogs.Config.alert_limits().query_timeout_ms)
+
+        %{hour: hour_count || 0, day: day_count || 0, week: week_count || 0}
+
+      _ ->
+        %{hour: 0, day: 0, week: 0}
+    end
+  end
+
   @doc """
-  Returns the current maximum log ID, or nil if no logs exist.
-  Used to set the baseline for new alerts to prevent retroactive triggering.
+  Returns the current maximum observed-time cursor, or `{nil, nil}` when empty.
   """
-  def max_log_id do
-    Repo.aggregate(Log, :max, :id)
+  def max_observed_cursor do
+    Log
+    |> order_by([l], desc: l.inserted_at, desc: l.id)
+    |> select([l], {l.inserted_at, l.id})
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> {nil, nil}
+      cursor -> cursor
+    end
   end
 
   # Plain term: search message OR any metadata value
@@ -428,11 +588,11 @@ defmodule WhisperLogs.Logs do
   end
 
   @doc """
-  Returns the timestamp of the oldest log in the database.
+  Returns the observed timestamp of the oldest log in the database.
   Returns nil if no logs exist.
   """
   def oldest_log_timestamp do
-    Repo.aggregate(Log, :min, :timestamp)
+    Repo.aggregate(Log, :min, :inserted_at)
   end
 
   @doc """
@@ -445,7 +605,7 @@ defmodule WhisperLogs.Logs do
     volume_select = DbAdapter.volume_select_hour()
 
     Log
-    |> where([l], l.timestamp >= ^cutoff)
+    |> where([l], l.inserted_at >= ^cutoff)
     |> group_by([l], ^trunc)
     |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
@@ -463,7 +623,7 @@ defmodule WhisperLogs.Logs do
     volume_select = DbAdapter.volume_select_day()
 
     Log
-    |> where([l], l.timestamp >= ^cutoff)
+    |> where([l], l.inserted_at >= ^cutoff)
     |> group_by([l], ^trunc)
     |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
@@ -481,7 +641,7 @@ defmodule WhisperLogs.Logs do
     volume_select = DbAdapter.volume_select_month()
 
     Log
-    |> where([l], l.timestamp >= ^cutoff)
+    |> where([l], l.inserted_at >= ^cutoff)
     |> group_by([l], ^trunc)
     |> select([l], ^volume_select)
     |> order_by(^[asc: trunc])
@@ -499,7 +659,7 @@ defmodule WhisperLogs.Logs do
 
     result =
       Log
-      |> where([l], l.timestamp >= ^cutoff)
+      |> where([l], l.inserted_at >= ^cutoff)
       |> select([l], ^volume_select)
       |> Repo.one()
 
@@ -517,7 +677,7 @@ defmodule WhisperLogs.Logs do
   """
   def delete_before(%DateTime{} = cutoff) do
     Log
-    |> where([l], l.timestamp < ^cutoff)
+    |> where([l], l.inserted_at < ^cutoff)
     |> Repo.delete_all()
   end
 
@@ -535,30 +695,19 @@ defmodule WhisperLogs.Logs do
     Phoenix.PubSub.broadcast(@pubsub, @topic, message)
   end
 
-  defp parse_timestamp(nil), do: nil
-
-  defp parse_timestamp(ts) when is_binary(ts) do
-    case DateTime.from_iso8601(ts) do
-      {:ok, dt, _offset} -> DateTime.truncate(dt, :microsecond)
-      _ -> nil
-    end
-  end
-
-  defp parse_timestamp(_), do: nil
-
-  defp normalize_level(level) when level in ~w(debug info warning error), do: level
-  defp normalize_level("warn"), do: "warning"
-  defp normalize_level(_), do: "info"
-
   defp parse_numeric(value) when is_binary(value) do
-    case Decimal.parse(value) do
-      {decimal, ""} ->
-        # SQLite doesn't support Decimal type, convert to float
-        num = if DbAdapter.sqlite?(), do: Decimal.to_float(decimal), else: decimal
-        {:ok, num}
+    if byte_size(value) <= 128 and
+         Regex.match?(~r/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/, value) do
+      case Decimal.parse(value) do
+        {decimal, ""} ->
+          num = if DbAdapter.sqlite?(), do: Decimal.to_float(decimal), else: decimal
+          {:ok, num}
 
-      _ ->
-        :error
+        _error ->
+          :error
+      end
+    else
+      :error
     end
   end
 

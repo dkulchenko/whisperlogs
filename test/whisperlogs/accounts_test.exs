@@ -6,6 +6,13 @@ defmodule WhisperLogs.AccountsTest do
   import WhisperLogs.AccountsFixtures
   alias WhisperLogs.Accounts.{User, UserToken}
 
+  setup do
+    previous = Application.get_env(:whisperlogs, :registration)
+    Application.put_env(:whisperlogs, :registration, allow_public: true)
+    on_exit(fn -> Application.put_env(:whisperlogs, :registration, previous) end)
+    :ok
+  end
+
   describe "get_user_by_email/1" do
     test "does not return the user if the email does not exist" do
       refute Accounts.get_user_by_email("unknown@example.com")
@@ -55,13 +62,14 @@ defmodule WhisperLogs.AccountsTest do
 
     test "returns false when users exist and config is false" do
       user_fixture()
+      Application.put_env(:whisperlogs, :registration, allow_public: false)
       refute Accounts.registration_allowed?()
     end
   end
 
-  describe "register_user/1" do
+  describe "register_public_user/2" do
     test "requires email, password, and password confirmation to be set" do
-      {:error, changeset} = Accounts.register_user(%{})
+      {:error, changeset} = Accounts.register_public_user(nil, %{})
 
       assert %{
                email: ["can't be blank"],
@@ -74,7 +82,7 @@ defmodule WhisperLogs.AccountsTest do
       password = valid_user_password()
 
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: "not valid",
           password: password,
           password_confirmation: password
@@ -88,7 +96,7 @@ defmodule WhisperLogs.AccountsTest do
       password = valid_user_password()
 
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: too_long,
           password: password,
           password_confirmation: password
@@ -104,7 +112,7 @@ defmodule WhisperLogs.AccountsTest do
       password = valid_user_password()
 
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: email,
           password: password,
           password_confirmation: password
@@ -114,7 +122,7 @@ defmodule WhisperLogs.AccountsTest do
 
       # Now try with the uppercased email too, to check that email case is ignored.
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: String.upcase(email),
           password: password,
           password_confirmation: password
@@ -123,12 +131,12 @@ defmodule WhisperLogs.AccountsTest do
       assert "has already been taken" in errors_on(changeset).email
     end
 
-    test "registers users with password and auto-confirms" do
+    test "registers a password-bearing non-admin user" do
       email = unique_user_email()
       password = valid_user_password()
 
       {:ok, user} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: email,
           password: password,
           password_confirmation: password
@@ -136,13 +144,13 @@ defmodule WhisperLogs.AccountsTest do
 
       assert user.email == email
       assert user.hashed_password != nil
-      assert user.confirmed_at != nil
+      refute user.is_admin
       assert is_nil(user.password)
     end
 
     test "validates password length" do
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: unique_user_email(),
           password: "short",
           password_confirmation: "short"
@@ -153,7 +161,7 @@ defmodule WhisperLogs.AccountsTest do
 
     test "validates password confirmation matches" do
       {:error, changeset} =
-        Accounts.register_user(%{
+        Accounts.register_public_user(nil, %{
           email: unique_user_email(),
           password: valid_user_password(),
           password_confirmation: "different_password"

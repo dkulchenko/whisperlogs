@@ -89,6 +89,11 @@ defmodule WhisperLogs.Exports.S3ClientMock do
     end
   end
 
+  def upload_file(config, key, path, _deadline) do
+    body = File.read!(path)
+    put_object(config, key, body, content_type: "application/gzip")
+  end
+
   @doc """
   Mock implementation of test_connection/1.
   """

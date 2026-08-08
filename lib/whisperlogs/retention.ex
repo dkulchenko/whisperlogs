@@ -41,7 +41,13 @@ defmodule WhisperLogs.Retention do
 
   defp run_cleanup(retention_days) do
     # Clean up old logs
-    log_cutoff = DateTime.utc_now() |> DateTime.add(-retention_days, :day)
+    retention_cutoff = DateTime.utc_now() |> DateTime.add(-retention_days, :day)
+    protected = Exports.earliest_protected_scheduled_time()
+
+    log_cutoff =
+      if protected && DateTime.compare(protected, retention_cutoff) == :lt,
+        do: protected,
+        else: retention_cutoff
 
     case Logs.delete_before(log_cutoff) do
       {0, _} ->

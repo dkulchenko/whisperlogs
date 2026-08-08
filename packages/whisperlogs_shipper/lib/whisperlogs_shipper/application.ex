@@ -6,10 +6,7 @@ defmodule WhisperLogs.Shipper.Application do
   def start(_type, _args) do
     children =
       if enabled?() do
-        [
-          {Task.Supervisor, name: WhisperLogs.Shipper.TaskSupervisor},
-          WhisperLogs.Shipper
-        ]
+        [WhisperLogs.Shipper]
       else
         []
       end

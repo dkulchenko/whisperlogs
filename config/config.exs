@@ -29,16 +29,49 @@ config :whisperlogs,
   ecto_repos: [WhisperLogs.Repo],
   generators: [timestamp_type: :utc_datetime]
 
-# Registration settings
-# When allow_public is false, registration closes after first user is created
+# Registration is explicit; bootstrap owns initial account creation.
 config :whisperlogs, :registration, allow_public: false
 
-# Source cache settings (ETS-based caching to reduce DB load during log ingestion)
-config :whisperlogs, WhisperLogs.SourceCache,
-  # How long to cache source lookups (seconds) - affects revocation delay
-  source_ttl: 15,
-  # How often to update last_used_at in DB (seconds) - purely informational
-  touch_ttl: 300
+config :whisperlogs, :bootstrap, enabled: true
+
+config :whisperlogs, :receiver_limits, %{
+  max_request_bytes: 8_000_000,
+  max_batch_size: 250,
+  max_message_bytes: 65_536,
+  max_metadata_bytes: 131_072,
+  max_metadata_depth: 8,
+  max_event_bytes: 262_144
+}
+
+config :whisperlogs, :export_limits, %{
+  max_range_days: 31,
+  max_pending_per_user: 2,
+  max_pending_global: 10,
+  max_rows: 2_000_000,
+  max_compressed_bytes: 536_870_912,
+  timeout_seconds: 1_800
+}
+
+config :whisperlogs, :alert_limits, %{
+  max_concurrency: 2,
+  query_timeout_ms: 5_000,
+  cycle_timeout_ms: 20_000
+}
+
+config :whisperlogs, :syslog_limits, %{
+  max_connections: 128,
+  max_connections_per_source: 32,
+  max_frame_bytes: 65_536,
+  max_queued_per_source: 128,
+  max_queued_global: 512,
+  ingest_workers: 2,
+  idle_timeout_ms: 300_000,
+  tls_handshake_timeout_ms: 5_000
+}
+
+config :whisperlogs, :s3_allowed_hosts, []
+config :whisperlogs, :export_root, Path.expand("../exports", __DIR__)
+config :whisperlogs, :dns_cluster_query, nil
 
 # Configure the endpoint
 config :whisperlogs, WhisperLogsWeb.Endpoint,

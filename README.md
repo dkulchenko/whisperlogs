@@ -7,9 +7,14 @@ A lightweight, self-hosted log aggregation and alerting system. Collect logs fro
 ## Quick Start
 
 1. Download the latest release for your platform from the [releases page](https://github.com/dkulchenko/whisperlogs/releases)
-2. Run the executable:
+2. Create a private bootstrap password file and run the executable:
 
 ```bash
+install -m 600 /dev/null ./whisperlogs_admin_password
+printf '%s' 'replace-with-a-long-password' > ./whisperlogs_admin_password
+export WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=local@localhost
+export WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE="$PWD/whisperlogs_admin_password"
+
 ./whisperlogs_linux      # Linux x86_64
 ./whisperlogs_linux_arm  # Linux ARM64
 ./whisperlogs_macos      # macOS Intel
@@ -19,7 +24,9 @@ whisperlogs_windows.exe  # Windows
 
 3. Open http://localhost:4050
 
-That's it!
+SQLite defaults to a loopback listener and persists its generated session secret beside the
+database. The bootstrap variables are required only while creating the first administrator (or
+upgrading the recognized legacy `local@localhost` account).
 
 ## Features
 
@@ -61,7 +68,7 @@ Route alerts to the channels you already use:
 Collect logs from anywhere:
 - **HTTP API** - POST JSON from any language
 - **Syslog** - RFC 3164 and RFC 5424 support (UDP/TCP)
-- **Elixir Shipper** - zero-config Logger integration
+- **Elixir Shipper** - bounded Logger integration with finite HTTP timeouts and retries
 
 ## Sending Logs
 
@@ -97,7 +104,7 @@ curl -X POST https://your-whisperlogs-server/api/v1/logs \
 |-------|----------|-------------|
 | `timestamp` | No | ISO 8601 timestamp (defaults to server time) |
 | `level` | No | Log level: `debug`, `info`, `warning`, `error` |
-| `message` | Yes | Log message text |
+| `message` | No | Log message text (defaults to an empty string) |
 | `metadata` | No | JSON object with additional data |
 | `request_id` | No | Request correlation ID |
 
@@ -150,7 +157,7 @@ See [packages/whisperlogs_shipper/README.md](packages/whisperlogs_shipper/README
 WhisperLogs can receive logs via standard syslog protocol (RFC 3164 and RFC 5424):
 
 1. Create a Syslog source in the WhisperLogs UI (Sources page)
-2. Configure the port (1024-65535) and transport (UDP, TCP, or both)
+2. Configure the port (1024-65535), admission policy, and transport (UDP, TCP, both, or mTLS)
 3. Point your applications or systems to the syslog endpoint:
 
 ```bash
@@ -163,14 +170,17 @@ logger -n your-whisperlogs-server -P 5514 "Application started"
 ```
 
 **Syslog features:**
-- UDP and TCP support (configurable per source)
-- Host allow-listing for security
-- Auto-registration of new hosts (optional)
+- UDP and plaintext TCP as explicit warned choices, plus TLS 1.2/1.3 with required client certificates
+- Deny-by-default IP/CIDR allowlists, or an explicit `any` admission mode
+- Per-source typed certificate/SPKI SHA-256 identity allowlists for mTLS rotation
+- Bounded frames, connections, queues, and ingest workers
 - Automatic severity-to-level mapping
 
 ## Production Deployment
 
-By default, WhisperLogs uses SQLite which requires no configuration. For production deployments with multiple users or high concurrency, you can use PostgreSQL instead.
+WhisperLogs supports SQLite and PostgreSQL. Every database must have exactly one running
+WhisperLogs application process: use stop-before-start replacement, not overlapping rolling
+deployments. PostgreSQL does not make the recurring schedulers/listeners distributed singletons.
 
 ### Docker (SQLite with Durable Storage by Default)
 
@@ -185,8 +195,12 @@ Run with a persistent Docker volume:
 ```bash
 docker run -d \
   --name whisperlogs \
-  -p 4050:4050 \
+  -p 127.0.0.1:4050:4050 \
   -v whisperlogs_data:/var/lib/whisperlogs \
+  -v "$PWD/whisperlogs_admin_password:/run/secrets/whisperlogs_admin_password:ro" \
+  -e WHISPERLOGS_BIND_IP=0.0.0.0 \
+  -e WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=local@localhost \
+  -e WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/whisperlogs_admin_password \
   whisperlogs:latest
 ```
 
@@ -206,7 +220,8 @@ If you configure Syslog sources, publish those ports too (for example `5514/tcp`
 
 Set `DATABASE_URL` to switch to PostgreSQL mode. In Docker, pending migrations are run automatically at container startup before the app boots.
 
-Set `SECRET_KEY_BASE` in container deployments to keep sessions stable across restarts (required in PostgreSQL mode, recommended in SQLite mode).
+Set `SECRET_KEY_BASE` in PostgreSQL deployments. SQLite creates a private persistent secret next
+to `DATABASE_PATH` when one is not supplied.
 
 ### Using PostgreSQL
 
@@ -215,24 +230,29 @@ Set the `DATABASE_URL` environment variable to switch to PostgreSQL mode:
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
 export SECRET_KEY_BASE="$(openssl rand -base64 48)"
+export WHISPERLOGS_EXPORT_ROOT="/var/lib/whisperlogs/exports"
+export WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
+export WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE="$PWD/whisperlogs_admin_password"
 ./whisperlogs_linux eval "WhisperLogs.Release.migrate()"
 ./whisperlogs_linux
 ```
 
-Then open the browser and register the first user account.
+The bootstrap child creates the initial administrator before the endpoint starts. Public
+registration is disabled unless `config :whisperlogs, :registration, allow_public: true` is set;
+public registration always creates non-admin users.
 
 ### Migrating SQLite data to PostgreSQL
 
 Stop WhisperLogs before migrating so the SQLite database cannot change during the copy. The
 PostgreSQL target should be empty; the migration task runs migrations, copies all application
-tables, verifies row counts, and sets login credentials for the migrated admin user.
+tables, verifies row counts, and preserves the source administrator. A recognized passwordless
+legacy `local@localhost` administrator is upgraded using the same private password file contract.
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
 export SQLITE_DATABASE_PATH="/var/lib/whisperlogs/db.sqlite"
 export SECRET_KEY_BASE="$(openssl rand -base64 48)"
-export ADMIN_EMAIL="admin@example.com"
-export ADMIN_PASSWORD="replace-with-a-long-password"
+export WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE="$PWD/whisperlogs_admin_password"
 ./whisperlogs_linux eval "WhisperLogs.Release.migrate_sqlite_to_postgres()"
 ```
 
@@ -247,14 +267,19 @@ that already has application rows.
 | `DATABASE_URL` | - | PostgreSQL connection URL (enables PostgreSQL mode) |
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
 | `SQLITE_DATABASE_PATH` | `DATABASE_PATH` | Source SQLite database path for SQLite-to-PostgreSQL migration |
-| `ADMIN_EMAIL` | - | Admin login email to set during SQLite-to-PostgreSQL migration |
-| `ADMIN_PASSWORD` | - | Admin login password to set during SQLite-to-PostgreSQL migration |
+| `WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL` | - | Initial administrator email for an empty database |
+| `WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE` | - | Absolute private regular file containing the initial/legacy administrator password |
 | `MIGRATION_BATCH_SIZE` | `1000` | Rows per batch during SQLite-to-PostgreSQL migration |
 | `MIGRATION_ALLOW_NON_EMPTY_TARGET` | `false` | Allow migration into a PostgreSQL target with existing application rows |
-| `SECRET_KEY_BASE` | - | Required for PostgreSQL mode, recommended for stable sessions in containerized SQLite deployments |
+| `SECRET_KEY_BASE` | SQLite: persisted automatically | Required for PostgreSQL mode |
 | `PHX_HOST` | `localhost` | Server hostname |
+| `WHISPERLOGS_BIND_IP` | `127.0.0.1` | IP literal to bind; containers normally set `0.0.0.0` and publish a loopback host port |
 | `PORT` | `4050` | Web server port |
 | `POOL_SIZE` | `10` | Database connection pool size |
+
+See [the security and operations reference](docs/security-and-operations.md) for all validated
+limits, time semantics, ownership rules, export/S3 behavior, and shipper retry policy. See
+[the deployment runbook](docs/deployment.md) before upgrading an existing installation.
 
 ## Development
 

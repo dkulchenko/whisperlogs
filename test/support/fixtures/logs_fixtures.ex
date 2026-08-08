@@ -33,10 +33,7 @@ defmodule WhisperLogs.LogsFixtures do
       "metadata" => metadata_with_marker
     }
 
-    {1, _} = Logs.insert_batch(source, [log_data])
-
-    # Fetch by searching for our unique marker
-    [log] = Logs.list_logs(sources: [source], search: "_test_marker:#{unique_id}", limit: 1)
+    {:ok, [log]} = Logs.insert_batch(source, [log_data])
     log
   end
 
@@ -66,9 +63,9 @@ defmodule WhisperLogs.LogsFixtures do
         }
       end
 
-    {^count, _} = Logs.insert_batch(source, logs)
+    {:ok, inserted_logs} = Logs.insert_batch(source, logs)
 
-    Logs.list_logs(sources: [source], limit: count)
+    Enum.reverse(inserted_logs)
   end
 
   @doc """
@@ -87,7 +84,7 @@ defmodule WhisperLogs.LogsFixtures do
       end)
 
     count = length(logs)
-    {^count, _} = Logs.insert_batch(source, logs)
+    {:ok, _inserted_logs} = Logs.insert_batch(source, logs)
 
     Logs.list_logs(sources: [source], limit: count)
   end

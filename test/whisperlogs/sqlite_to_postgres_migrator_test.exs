@@ -14,7 +14,6 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
   alias WhisperLogs.SQLiteToPostgresMigrator
   alias WhisperLogs.{Accounts, Exports}
 
-  @admin_email "admin@example.com"
   @admin_password "correct horse battery staple"
 
   setup do
@@ -64,8 +63,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert {:ok, report} =
              SQLiteToPostgresMigrator.migrate(
                source_path: sqlite_path,
-               admin_email: @admin_email,
-               admin_password: @admin_password,
+               bootstrap_admin_password_file: password_file!(),
                batch_size: 2,
                print_report?: false
              )
@@ -73,13 +71,14 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert Enum.find(report, &(&1.table == "logs")).target_count == 2
 
     user = Postgres.one!(from u in User, where: u.id == 1)
-    assert user.email == @admin_email
+    assert user.email == "local@localhost"
     assert user.is_admin
     assert User.valid_password?(user, @admin_password)
 
     syslog_source = Postgres.get_by!(Source, source: "syslog-main")
     assert syslog_source.allowed_hosts == ["127.0.0.1", "10.0.0.2"]
-    assert syslog_source.auto_register_hosts
+    refute syslog_source.enabled
+    assert syslog_source.admission_mode == "any"
 
     log = Postgres.get!(Log, 11)
     assert log.metadata == %{"request_id" => "req-1", "duration_ms" => 12.5}
@@ -135,8 +134,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert_raise ArgumentError, ~r/PostgreSQL target already contains data/, fn ->
       SQLiteToPostgresMigrator.migrate(
         source_path: sqlite_path,
-        admin_email: @admin_email,
-        admin_password: @admin_password,
+        bootstrap_admin_password_file: password_file!(),
         print_report?: false
       )
     end
@@ -157,8 +155,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert {:ok, report} =
              SQLiteToPostgresMigrator.migrate(
                source_path: sqlite_path,
-               admin_email: @admin_email,
-               admin_password: @admin_password,
+               bootstrap_admin_password_file: password_file!(),
                allow_non_empty_target?: true,
                print_report?: false
              )
@@ -170,20 +167,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert Postgres.get!(Log, existing_log.id).message == "existing target row"
   end
 
-  test "requires admin credentials and an existing source file" do
-    assert_raise ArgumentError, ~r/ADMIN_EMAIL is required/, fn ->
-      SQLiteToPostgresMigrator.migrate(
-        source_path: "/tmp/does-not-matter.sqlite",
-        admin_password: @admin_password,
-        print_report?: false
-      )
-    end
-
+  test "requires an existing source file" do
     assert_raise ArgumentError, ~r/SQLite source database does not exist/, fn ->
       SQLiteToPostgresMigrator.migrate(
         source_path: "/tmp/missing-whisperlogs.sqlite",
-        admin_email: @admin_email,
-        admin_password: @admin_password,
         print_report?: false
       )
     end
@@ -244,6 +231,15 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     SQL.query!(
       repo,
       """
+      INSERT INTO users (id, email, hashed_password, is_admin, inserted_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      """,
+      [1, "local@localhost", nil, 1, now, now]
+    )
+
+    SQL.query!(
+      repo,
+      """
       INSERT INTO users_tokens
         (id, user_id, token, context, sent_to, authenticated_at, inserted_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -255,9 +251,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
       repo,
       """
       INSERT INTO sources
-        (id, user_id, name, source, key, last_used_at, revoked_at, inserted_at, updated_at,
-         type, port, transport, allowed_hosts, auto_register_hosts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, name, source, key, revoked_at, inserted_at, updated_at,
+         type, port, transport, allowed_hosts, enabled, admission_mode, tls_framing,
+         tls_client_identities)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """,
       [
         source_id,
@@ -265,7 +262,6 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
         "HTTP API",
         "api",
         "wl_test",
-        now,
         nil,
         now,
         now,
@@ -273,7 +269,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
         nil,
         nil,
         "[]",
-        0
+        1,
+        "allowlist",
+        nil,
+        "[]"
       ]
     )
 
@@ -281,9 +280,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
       repo,
       """
       INSERT INTO sources
-        (id, user_id, name, source, key, last_used_at, revoked_at, inserted_at, updated_at,
-         type, port, transport, allowed_hosts, auto_register_hosts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, name, source, key, revoked_at, inserted_at, updated_at,
+         type, port, transport, allowed_hosts, enabled, admission_mode, tls_framing,
+         tls_client_identities)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """,
       [
         syslog_source_id,
@@ -292,14 +292,16 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
         "syslog-main",
         nil,
         nil,
-        nil,
         now,
         now,
         "syslog",
         5514,
         "udp",
         ~s(["127.0.0.1","10.0.0.2"]),
-        1
+        0,
+        "any",
+        nil,
+        "[]"
       ]
     )
 
@@ -331,10 +333,10 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
       repo,
       """
       INSERT INTO notification_channels
-        (id, user_id, channel_type, name, enabled, config, verified_at, inserted_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (id, user_id, channel_type, name, enabled, config, inserted_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       """,
-      [21, nil, "email", "Ops", 1, ~s({"email":"ops@example.com"}), now, now, now]
+      [21, nil, "email", "Ops", 1, ~s({"email":"ops@example.com"}), now, now]
     )
 
     SQL.query!(
@@ -343,8 +345,9 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
       INSERT INTO alerts
         (id, user_id, name, description, enabled, search_query, alert_type,
          velocity_threshold, velocity_window_seconds, cooldown_seconds,
-         last_seen_log_id, last_triggered_at, last_checked_at, inserted_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         last_seen_log_id, last_seen_inserted_at, last_triggered_at, last_checked_at,
+         inserted_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       """,
       [
         31,
@@ -358,6 +361,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
         nil,
         300,
         11,
+        "2026-05-30T12:01:00.123456Z",
         now,
         now,
         now,
@@ -461,5 +465,18 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
       """,
       [81, 1, "Errors", "level:error", "api", "error,warning", "24h", now, now]
     )
+  end
+
+  defp password_file! do
+    path =
+      Path.join(
+        System.tmp_dir!(),
+        "whisperlogs-bootstrap-password-#{System.unique_integer([:positive])}"
+      )
+
+    File.write!(path, @admin_password, [:exclusive])
+    File.chmod!(path, 0o600)
+    on_exit(fn -> File.rm(path) end)
+    path
   end
 end

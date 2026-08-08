@@ -57,7 +57,7 @@ defmodule WhisperLogsWeb.LogsLive do
   defp extract_cursors(logs) do
     first = List.first(logs)
     last = List.last(logs)
-    {{first.timestamp, first.id}, {last.timestamp, last.id}}
+    {{first.inserted_at, first.id}, {last.inserted_at, last.id}}
   end
 
   defp schedule_flush do
@@ -74,7 +74,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
     if at_bottom? do
       newest_log = List.last(logs_to_insert)
-      new_cursor_bottom = {newest_log.timestamp, newest_log.id}
+      new_cursor_bottom = {newest_log.inserted_at, newest_log.id}
 
       socket
       |> assign(:log_buffer, [])
@@ -206,7 +206,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   type="button"
                   phx-click="view-in-context"
                   phx-value-id={log.id}
-                  phx-value-timestamp={DateTime.to_iso8601(log.timestamp)}
+                  phx-value-timestamp={DateTime.to_iso8601(log.inserted_at)}
                   class="flex-shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-surface transition-all"
                   title="View in context"
                 >
@@ -1234,7 +1234,7 @@ defmodule WhisperLogsWeb.LogsLive do
         else
           # older_logs is in desc order (newest first), so last is the oldest
           oldest = List.last(older_logs)
-          new_cursor_top = {oldest.timestamp, oldest.id}
+          new_cursor_top = {oldest.inserted_at, oldest.id}
           still_has_older? = Logs.has_logs_before?(new_cursor_top, filter_opts(filters))
 
           # After prepending with limit, some logs are pruned from the end.
@@ -1247,11 +1247,11 @@ defmodule WhisperLogsWeb.LogsLive do
 
           new_cursor_bottom =
             if new_bottom_log do
-              {new_bottom_log.timestamp, new_bottom_log.id}
+              {new_bottom_log.inserted_at, new_bottom_log.id}
             else
               # Edge case: only the prepended logs exist
               newest = List.first(older_logs)
-              {newest.timestamp, newest.id}
+              {newest.inserted_at, newest.id}
             end
 
           # Don't reverse - sequential insertion at: 0 will reverse the DESC order to ASC
@@ -1286,7 +1286,7 @@ defmodule WhisperLogsWeb.LogsLive do
         else
           # newer_logs is in asc order (oldest first), so last is the newest
           newest = List.last(newer_logs)
-          new_cursor_bottom = {newest.timestamp, newest.id}
+          new_cursor_bottom = {newest.inserted_at, newest.id}
           still_has_newer? = Logs.has_logs_after?(new_cursor_bottom, filter_opts(filters))
 
           socket
@@ -1377,30 +1377,25 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   @impl true
-  def handle_info({:new_log, log}, socket) do
-    if socket.assigns.live_tail and log_matches_filters?(log, socket.assigns.filters) do
-      buffer = [log | socket.assigns.log_buffer]
+  def handle_info({:new_logs, logs}, socket) do
+    matching =
+      if socket.assigns.live_tail,
+        do: Enum.filter(logs, &log_matches_filters?(&1, socket.assigns.filters)),
+        else: []
+
+    if matching == [] do
+      {:noreply, socket}
+    else
+      buffer = Enum.reverse(matching) ++ socket.assigns.log_buffer
 
       sources =
-        if log.source in socket.assigns.sources do
-          socket.assigns.sources
-        else
-          [log.source | socket.assigns.sources] |> Enum.sort()
-        end
+        (socket.assigns.sources ++ Enum.map(matching, & &1.source)) |> Enum.uniq() |> Enum.sort()
 
-      socket =
-        socket
-        |> assign(:sources, sources)
-        |> assign(:log_buffer, buffer)
+      socket = socket |> assign(:sources, sources) |> assign(:log_buffer, buffer)
 
-      # Force flush if buffer too large (back-pressure)
-      if length(buffer) >= @max_buffer_size do
-        {:noreply, flush_buffer(socket)}
-      else
-        {:noreply, socket}
-      end
-    else
-      {:noreply, socket}
+      if length(buffer) >= @max_buffer_size,
+        do: {:noreply, flush_buffer(socket)},
+        else: {:noreply, socket}
     end
   end
 

@@ -14,7 +14,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       alert = any_match_alert_fixture(user)
 
-      alerts = Alerts.list_alerts(user)
+      alerts = Alerts.list_alerts(user_scope_fixture(user))
       assert length(alerts) == 1
       assert hd(alerts).id == alert.id
     end
@@ -25,7 +25,7 @@ defmodule WhisperLogs.AlertsTest do
       _alert1 = any_match_alert_fixture(user1)
       alert2 = any_match_alert_fixture(user2)
 
-      alerts = Alerts.list_alerts(user2)
+      alerts = Alerts.list_alerts(user_scope_fixture(user2))
       assert length(alerts) == 1
       assert hd(alerts).id == alert2.id
     end
@@ -35,7 +35,7 @@ defmodule WhisperLogs.AlertsTest do
       alert1 = any_match_alert_fixture(user, name: "First")
       alert2 = any_match_alert_fixture(user, name: "Second")
 
-      alerts = Alerts.list_alerts(user)
+      alerts = Alerts.list_alerts(user_scope_fixture(user))
       assert length(alerts) == 2
       # Both alerts created nearly simultaneously, so order by ID is the tiebreaker
       # Just verify we get both alerts back
@@ -49,7 +49,7 @@ defmodule WhisperLogs.AlertsTest do
       channel = email_channel_fixture(user)
       _alert = any_match_alert_fixture(user, channel_ids: [channel.id])
 
-      [alert] = Alerts.list_alerts(user)
+      [alert] = Alerts.list_alerts(user_scope_fixture(user))
       assert Ecto.assoc_loaded?(alert.notification_channels)
       assert length(alert.notification_channels) == 1
     end
@@ -84,13 +84,13 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       alert = any_match_alert_fixture(user)
 
-      result = Alerts.get_alert(user, alert.id)
+      result = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert result.id == alert.id
     end
 
     test "returns nil for non-existent alert" do
       user = user_fixture()
-      assert Alerts.get_alert(user, 999_999) == nil
+      assert Alerts.get_alert(user_scope_fixture(user), 999_999) == nil
     end
 
     test "returns nil for alert belonging to other user" do
@@ -98,7 +98,7 @@ defmodule WhisperLogs.AlertsTest do
       user2 = user_fixture()
       alert = any_match_alert_fixture(user1)
 
-      assert Alerts.get_alert(user2, alert.id) == nil
+      assert Alerts.get_alert(user_scope_fixture(user2), alert.id) == nil
     end
 
     test "preloads notification_channels" do
@@ -106,7 +106,7 @@ defmodule WhisperLogs.AlertsTest do
       channel = email_channel_fixture(user)
       alert = any_match_alert_fixture(user, channel_ids: [channel.id])
 
-      result = Alerts.get_alert(user, alert.id)
+      result = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert Ecto.assoc_loaded?(result.notification_channels)
       assert length(result.notification_channels) == 1
     end
@@ -117,7 +117,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:ok, alert} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Error Alert",
           search_query: "level:error",
           alert_type: "any_match",
@@ -136,7 +136,7 @@ defmodule WhisperLogs.AlertsTest do
       log = log_fixture("test-source")
 
       {:ok, alert} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test Alert",
           search_query: "level:error",
           alert_type: "any_match",
@@ -153,7 +153,7 @@ defmodule WhisperLogs.AlertsTest do
 
       {:ok, alert} =
         Alerts.create_alert(
-          user,
+          user_scope_fixture(user),
           %{
             name: "Test Alert",
             search_query: "level:error",
@@ -169,7 +169,7 @@ defmodule WhisperLogs.AlertsTest do
     test "validates required fields" do
       user = user_fixture()
 
-      {:error, changeset} = Alerts.create_alert(user, %{})
+      {:error, changeset} = Alerts.create_alert(user_scope_fixture(user), %{})
 
       assert errors_on(changeset) |> Map.has_key?(:name)
       assert errors_on(changeset) |> Map.has_key?(:search_query)
@@ -180,7 +180,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test",
           search_query: "error",
           alert_type: "invalid",
@@ -194,7 +194,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test",
           search_query: "error",
           alert_type: "any_match",
@@ -210,7 +210,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:ok, alert} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "High Volume Alert",
           search_query: "level:error",
           alert_type: "velocity",
@@ -228,7 +228,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test",
           search_query: "error",
           alert_type: "velocity",
@@ -243,7 +243,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test",
           search_query: "error",
           alert_type: "velocity",
@@ -258,7 +258,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_alert(user, %{
+        Alerts.create_alert(user_scope_fixture(user), %{
           name: "Test",
           search_query: "error",
           alert_type: "velocity",
@@ -277,7 +277,7 @@ defmodule WhisperLogs.AlertsTest do
       alert = any_match_alert_fixture(user, name: "Original")
 
       {:ok, updated} =
-        Alerts.update_alert(alert, %{
+        Alerts.update_alert(user_scope_fixture(user), alert.id, %{
           name: "Updated",
           description: "New description"
         })
@@ -292,7 +292,7 @@ defmodule WhisperLogs.AlertsTest do
       channel2 = pushover_channel_fixture(user)
       alert = any_match_alert_fixture(user, channel_ids: [channel1.id])
 
-      {:ok, updated} = Alerts.update_alert(alert, %{}, [channel2.id])
+      {:ok, updated} = Alerts.update_alert(user_scope_fixture(user), alert.id, %{}, [channel2.id])
 
       assert length(updated.notification_channels) == 1
       assert hd(updated.notification_channels).id == channel2.id
@@ -303,7 +303,8 @@ defmodule WhisperLogs.AlertsTest do
       channel = email_channel_fixture(user)
       alert = any_match_alert_fixture(user, channel_ids: [channel.id])
 
-      {:ok, updated} = Alerts.update_alert(alert, %{name: "New Name"}, nil)
+      {:ok, updated} =
+        Alerts.update_alert(user_scope_fixture(user), alert.id, %{name: "New Name"}, nil)
 
       assert length(updated.notification_channels) == 1
     end
@@ -314,9 +315,9 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       alert = any_match_alert_fixture(user)
 
-      {:ok, _} = Alerts.delete_alert(alert)
+      {:ok, _} = Alerts.delete_alert(user_scope_fixture(user), alert.id)
 
-      assert Alerts.get_alert(user, alert.id) == nil
+      assert Alerts.get_alert(user_scope_fixture(user), alert.id) == nil
     end
   end
 
@@ -325,7 +326,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       alert = any_match_alert_fixture(user, enabled: true)
 
-      {:ok, toggled} = Alerts.toggle_alert(alert)
+      {:ok, toggled} = Alerts.toggle_alert(user_scope_fixture(user), alert.id)
 
       assert toggled.enabled == false
     end
@@ -337,7 +338,7 @@ defmodule WhisperLogs.AlertsTest do
       # Create a log after alert creation
       log = log_fixture("test-source")
 
-      {:ok, toggled} = Alerts.toggle_alert(alert)
+      {:ok, toggled} = Alerts.toggle_alert(user_scope_fixture(user), alert.id)
 
       assert toggled.enabled == true
       assert toggled.last_seen_log_id == log.id
@@ -351,7 +352,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       channel = email_channel_fixture(user)
 
-      channels = Alerts.list_notification_channels(user)
+      channels = Alerts.list_notification_channels(user_scope_fixture(user))
       assert length(channels) == 1
       assert hd(channels).id == channel.id
     end
@@ -362,7 +363,7 @@ defmodule WhisperLogs.AlertsTest do
       _channel1 = email_channel_fixture(user1)
       channel2 = email_channel_fixture(user2)
 
-      channels = Alerts.list_notification_channels(user2)
+      channels = Alerts.list_notification_channels(user_scope_fixture(user2))
       assert length(channels) == 1
       assert hd(channels).id == channel2.id
     end
@@ -373,7 +374,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:ok, channel} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "My Email",
           channel_type: "email",
           config: %{"email" => "test@example.com"}
@@ -387,7 +388,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:ok, channel} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "My Pushover",
           channel_type: "pushover",
           config: %{
@@ -404,7 +405,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:ok, channel} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "My Slack",
           channel_type: "slack",
           config: %{
@@ -420,7 +421,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "Bad Email",
           channel_type: "email",
           config: %{"email" => "not-an-email"}
@@ -433,7 +434,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "Bad Pushover",
           channel_type: "pushover",
           config: %{"app_token" => "xyz"}
@@ -446,7 +447,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "Bad Pushover",
           channel_type: "pushover",
           config: %{"user_key" => "abc"}
@@ -459,7 +460,7 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
 
       {:error, changeset} =
-        Alerts.create_notification_channel(user, %{
+        Alerts.create_notification_channel(user_scope_fixture(user), %{
           name: "Bad Slack",
           channel_type: "slack",
           config: %{}
@@ -478,7 +479,7 @@ defmodule WhisperLogs.AlertsTest do
             "https://hooks.slack.com/services/"
           ] do
         {:error, changeset} =
-          Alerts.create_notification_channel(user, %{
+          Alerts.create_notification_channel(user_scope_fixture(user), %{
             name: "Bad Slack",
             channel_type: "slack",
             config: %{"webhook_url" => url}
@@ -495,7 +496,7 @@ defmodule WhisperLogs.AlertsTest do
       channel = email_channel_fixture(user, name: "Original")
 
       {:ok, updated} =
-        Alerts.update_notification_channel(channel, %{
+        Alerts.update_notification_channel(user_scope_fixture(user), channel.id, %{
           name: "Updated"
         })
 
@@ -508,9 +509,9 @@ defmodule WhisperLogs.AlertsTest do
       user = user_fixture()
       channel = email_channel_fixture(user)
 
-      {:ok, _} = Alerts.delete_notification_channel(channel)
+      {:ok, _} = Alerts.delete_notification_channel(user_scope_fixture(user), channel.id)
 
-      assert Alerts.get_notification_channel(user, channel.id) == nil
+      assert Alerts.get_notification_channel(user_scope_fixture(user), channel.id) == nil
     end
   end
 
@@ -522,7 +523,7 @@ defmodule WhisperLogs.AlertsTest do
       alert = any_match_alert_fixture(user)
       _history = alert_history_fixture(alert)
 
-      history = Alerts.list_alert_history(alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), alert.id)
       assert length(history) == 1
     end
 
@@ -532,7 +533,7 @@ defmodule WhisperLogs.AlertsTest do
       _history1 = alert_history_fixture(alert)
       history2 = alert_history_fixture(alert)
 
-      history = Alerts.list_alert_history(alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), alert.id)
       assert hd(history).id == history2.id
     end
 
@@ -541,7 +542,7 @@ defmodule WhisperLogs.AlertsTest do
       alert = any_match_alert_fixture(user)
       for _ <- 1..5, do: alert_history_fixture(alert)
 
-      history = Alerts.list_alert_history(alert, limit: 3)
+      history = Alerts.list_alert_history(user_scope_fixture(user), alert.id, limit: 3)
       assert length(history) == 3
     end
   end
@@ -580,7 +581,7 @@ defmodule WhisperLogs.AlertsTest do
       {count, _} = Alerts.delete_history_before(cutoff)
 
       assert count == 1
-      assert Alerts.list_alert_history(alert) == []
+      assert Alerts.list_alert_history(user_scope_fixture(user), alert.id) == []
     end
 
     test "preserves entries newer than cutoff" do
@@ -592,7 +593,101 @@ defmodule WhisperLogs.AlertsTest do
       {count, _} = Alerts.delete_history_before(cutoff)
 
       assert count == 0
-      assert length(Alerts.list_alert_history(alert)) == 1
+      assert length(Alerts.list_alert_history(user_scope_fixture(user), alert.id)) == 1
+    end
+  end
+
+  describe "serialized quotas and channel ownership" do
+    test "interleaves enabled alerts by owner" do
+      first = user_fixture()
+      second = user_fixture()
+
+      for index <- 1..3 do
+        any_match_alert_fixture(first, name: "First #{index}")
+        any_match_alert_fixture(second, name: "Second #{index}")
+      end
+
+      owners = Alerts.list_enabled_alerts() |> Enum.map(& &1.user_id)
+      assert Enum.chunk_every(owners, 2) |> Enum.all?(&(Enum.uniq(&1) == &1))
+    end
+
+    test "preserves SQL first-seen owner order before round robin" do
+      first = user_fixture()
+      second = user_fixture()
+      first_alert = any_match_alert_fixture(first)
+      second_alert = any_match_alert_fixture(second)
+
+      {:ok, _} =
+        Alerts.update_alert_state(first_alert, %{last_checked_at: DateTime.utc_now(:second)})
+
+      ordered = Alerts.list_enabled_alerts()
+      assert hd(ordered).id == second_alert.id
+      assert Enum.at(ordered, 1).id == first_alert.id
+    end
+
+    test "rejects the first stored-alert excess" do
+      user = user_fixture()
+      now = DateTime.utc_now(:second)
+
+      entries =
+        Enum.map(1..100, fn index ->
+          %{
+            user_id: user.id,
+            name: "Alert #{index}",
+            enabled: false,
+            search_query: "level:error",
+            alert_type: "any_match",
+            cooldown_seconds: 300,
+            inserted_at: now,
+            updated_at: now
+          }
+        end)
+
+      Repo.insert_all(WhisperLogs.Alerts.Alert, entries)
+
+      assert {:error, :alert_stored_quota_exceeded} =
+               Alerts.create_alert(user_scope_fixture(user), %{
+                 name: "Excess",
+                 enabled: false,
+                 search_query: "level:error",
+                 alert_type: "any_match",
+                 cooldown_seconds: 300
+               })
+    end
+
+    test "rejects the first per-user enabled-alert excess" do
+      user = user_fixture()
+
+      for index <- 1..20 do
+        any_match_alert_fixture(user, name: "Enabled #{index}")
+      end
+
+      candidate = any_match_alert_fixture(user, name: "Candidate", enabled: false)
+
+      assert {:error, :alert_user_enabled_quota_exceeded} =
+               Alerts.toggle_alert(user_scope_fixture(user), candidate.id)
+
+      refute Alerts.get_alert(user_scope_fixture(user), candidate.id).enabled
+    end
+
+    test "rejects a cross-owner notification-channel set before changing joins" do
+      owner = user_fixture()
+      other = user_fixture()
+      other_channel = email_channel_fixture(other)
+
+      assert {:error, :invalid_channels} =
+               Alerts.create_alert(
+                 user_scope_fixture(owner),
+                 %{
+                   name: "Cross owner",
+                   search_query: "level:error",
+                   alert_type: "any_match",
+                   cooldown_seconds: 300
+                 },
+                 [other_channel.id]
+               )
+
+      assert Alerts.list_alerts(user_scope_fixture(owner)) == []
     end
   end
 end

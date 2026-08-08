@@ -1,11 +1,18 @@
 defmodule WhisperLogsWeb.UserLive.LoginTest do
-  use WhisperLogsWeb.ConnCase, async: true
+  use WhisperLogsWeb.ConnCase, async: false
 
   # Multi-user auth tests only apply to PostgreSQL mode
   @moduletag :postgres_only
 
   import Phoenix.LiveViewTest
   import WhisperLogs.AccountsFixtures
+
+  setup do
+    original = Application.get_env(:whisperlogs, :registration)
+    Application.put_env(:whisperlogs, :registration, allow_public: true)
+    on_exit(fn -> Application.put_env(:whisperlogs, :registration, original) end)
+    :ok
+  end
 
   describe "login page" do
     test "renders login page", %{conn: conn} do
@@ -17,8 +24,7 @@ defmodule WhisperLogsWeb.UserLive.LoginTest do
     end
 
     test "hides signup link when registration is closed", %{conn: conn} do
-      # Create a user to close registration
-      user_fixture()
+      Application.put_env(:whisperlogs, :registration, allow_public: false)
 
       {:ok, _lv, html} = live(conn, ~p"/users/log-in")
 

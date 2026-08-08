@@ -11,7 +11,14 @@ defmodule WhisperLogs.ShipperTest do
     Application.put_env(:whisperlogs_shipper, :auth_token, "test_token")
     Application.put_env(:whisperlogs_shipper, :batch_size, 3)
     Application.put_env(:whisperlogs_shipper, :flush_interval_ms, 50_000)
-    Application.put_env(:whisperlogs_shipper, :inline_tasks, true)
+    Application.put_env(:whisperlogs_shipper, :max_admitted_events, 10_000)
+    Application.put_env(:whisperlogs_shipper, :max_admitted_bytes, 33_554_432)
+    Application.put_env(:whisperlogs_shipper, :max_request_bytes, 7_500_000)
+    Application.put_env(:whisperlogs_shipper, :max_message_bytes, 65_536)
+    Application.put_env(:whisperlogs_shipper, :max_metadata_bytes, 131_072)
+    Application.put_env(:whisperlogs_shipper, :max_metadata_depth, 8)
+    Application.put_env(:whisperlogs_shipper, :max_event_bytes, 262_144)
+    Application.put_env(:whisperlogs_shipper, :receive_timeout, 10_000)
 
     test_pid = self()
 
@@ -27,8 +34,6 @@ defmodule WhisperLogs.ShipperTest do
       |> Plug.Conn.send_resp(200, ~s({"status": "ok"}))
     end)
 
-    # Start TaskSupervisor and Shipper
-    start_supervised!({Task.Supervisor, name: WhisperLogs.Shipper.TaskSupervisor})
     {:ok, pid} = start_supervised(Shipper)
 
     # Allow the Shipper process to use our stub
@@ -185,16 +190,113 @@ defmodule WhisperLogs.ShipperTest do
 
         assert_receive :http_failed, 1000
 
-        # Shipper should still be alive
-        assert Process.alive?(pid)
+        # Drive the retained in-flight batch's retry deterministically.
+        send(pid, :retry)
+        assert_receive {:log_shipped, first_payload}, 1000
+        assert Enum.map(first_payload["logs"], & &1["message"]) == ["batch1-1", "batch1-2"]
 
         # Second batch - should succeed
         Shipper.log(%{level: "info", message: "batch2-1", timestamp: ts(), metadata: %{}})
         Shipper.log(%{level: "info", message: "batch2-2", timestamp: ts(), metadata: %{}})
 
         assert_receive {:log_shipped, payload}, 1000
-        assert length(payload["logs"]) == 2
+        assert Enum.map(payload["logs"], & &1["message"]) == ["batch2-1", "batch2-2"]
       end)
+    end
+
+    test "drops a terminal 4xx batch and continues with the next batch" do
+      test_pid = self()
+      call_count = :counters.new(1, [:atomics])
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        :counters.add(call_count, 1, 1)
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        if :counters.get(call_count, 1) == 1 do
+          send(test_pid, :terminal_batch)
+          Plug.Conn.send_resp(conn, 401, "unauthorized")
+        else
+          send(test_pid, {:log_shipped, Jason.decode!(body)})
+          Plug.Conn.send_resp(conn, 200, ~s({"status":"ok"}))
+        end
+      end)
+
+      {:ok, pid} = start_supervised(Shipper)
+      Req.Test.allow(__MODULE__, self(), pid)
+
+      capture_io(:stderr, fn ->
+        Shipper.log(%{level: "info", message: "drop-1", timestamp: ts(), metadata: %{}})
+        Shipper.log(%{level: "info", message: "drop-2", timestamp: ts(), metadata: %{}})
+        assert_receive :terminal_batch
+
+        Shipper.log(%{level: "info", message: "keep-1", timestamp: ts(), metadata: %{}})
+        Shipper.log(%{level: "info", message: "keep-2", timestamp: ts(), metadata: %{}})
+
+        assert_receive {:log_shipped, payload}
+        assert Enum.map(payload["logs"], & &1["message"]) == ["keep-1", "keep-2"]
+      end)
+    end
+
+    test "bounds response collection and retains the batch for retry" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, :oversized_response_sent)
+        Plug.Conn.send_resp(conn, 200, String.duplicate("x", 65_537))
+      end)
+
+      {:ok, pid} = start_supervised(Shipper)
+      Req.Test.allow(__MODULE__, self(), pid)
+
+      assert :ok =
+               Shipper.log(%{level: "info", message: "one", timestamp: ts(), metadata: %{}})
+
+      assert :ok =
+               Shipper.log(%{level: "info", message: "two", timestamp: ts(), metadata: %{}})
+
+      assert_receive :oversized_response_sent
+      state = :sys.get_state(pid)
+      assert state.in_flight != nil
+      assert state.retry_timer != nil
+    end
+  end
+
+  describe "pre-cast admission" do
+    setup do
+      stop_supervised(Shipper)
+      Application.put_env(:whisperlogs_shipper, :max_admitted_events, 1)
+      Application.put_env(:whisperlogs_shipper, :batch_size, 1)
+      Application.put_env(:whisperlogs_shipper, :flush_interval_ms, 50_000)
+      :ok
+    end
+
+    test "holds reservations across a transient failure and rejects overflow" do
+      test_pid = self()
+
+      Req.Test.stub(__MODULE__, fn conn ->
+        send(test_pid, :request_failed)
+        Plug.Conn.send_resp(conn, 500, "retry")
+      end)
+
+      {:ok, pid} = start_supervised(Shipper)
+      Req.Test.allow(__MODULE__, self(), pid)
+
+      assert :ok = Shipper.log(%{level: "info", message: "held", timestamp: ts(), metadata: %{}})
+      assert_receive :request_failed
+
+      capture_io(:stderr, fn ->
+        assert :dropped =
+                 Shipper.log(%{
+                   level: "info",
+                   message: "overflow",
+                   timestamp: ts(),
+                   metadata: %{}
+                 })
+      end)
+
+      state = :sys.get_state(pid)
+      assert {[_event], _body} = state.in_flight
+      assert state.retry_timer != nil
     end
   end
 

@@ -24,7 +24,6 @@ defmodule WhisperLogsWeb.SourcesLiveTest do
         |> Ecto.Changeset.change(%{
           email: "local@localhost",
           is_admin: true,
-          confirmed_at: now,
           inserted_at: now,
           updated_at: now
         })
@@ -147,7 +146,7 @@ defmodule WhisperLogsWeb.SourcesLiveTest do
           "source" => "router",
           "port" => "5514",
           "transport" => "udp",
-          "auto_register_hosts" => "true"
+          "admission_mode" => "any"
         })
         |> render_submit()
 

@@ -8,6 +8,31 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
   import WhisperLogs.AlertsFixtures
   import WhisperLogs.LogsFixtures
 
+  setup do
+    start_supervised!(Evaluator)
+    :ok
+  end
+
+  test "SQLite query timeouts cancel backend work and leave the repository usable" do
+    if WhisperLogs.DbAdapter.sqlite?() do
+      expensive_query = """
+      WITH RECURSIVE counter(value) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT value + 1 FROM counter WHERE value < 100000000
+      )
+      SELECT sum(value) FROM counter
+      """
+
+      assert_raise Exqlite.Error, ~r/interrupted/, fn ->
+        WhisperLogs.Repo.query!(expensive_query, [], timeout: 1)
+      end
+
+      :ok = Ecto.Adapters.SQL.Sandbox.checkout(WhisperLogs.Repo)
+      assert %{rows: [[1]]} = WhisperLogs.Repo.query!("SELECT 1")
+    end
+  end
+
   # Helper to trigger evaluation and wait for it to complete
   defp trigger_evaluation do
     send(Evaluator, :evaluate)
@@ -26,12 +51,12 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Check that alert was triggered
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
       assert updated_alert.last_checked_at != nil
 
       # Check history was created
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert length(history) == 1
       [entry] = history
       assert entry.trigger_type == "any_match"
@@ -43,17 +68,19 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       alert = any_match_alert_fixture(user, search_query: "level:error", cooldown_seconds: 60)
 
       # Create a non-matching log
-      _log = log_fixture("test-source", level: "info", message: "Everything is fine")
+      log = log_fixture("test-source", level: "info", message: "Everything is fine")
 
       trigger_evaluation()
 
       # Alert should not have triggered
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
       assert updated_alert.last_checked_at != nil
+      assert updated_alert.last_seen_inserted_at == log.inserted_at
+      assert updated_alert.last_seen_log_id == log.id
 
       # No history
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert history == []
     end
 
@@ -69,7 +96,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger because log1 was before alert creation
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
 
       # Create new log
@@ -78,7 +105,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Now should trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
       assert updated_alert.last_seen_log_id == log2.id
     end
@@ -93,7 +120,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # First trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       first_trigger = updated_alert.last_triggered_at
       assert first_trigger != nil
 
@@ -103,11 +130,11 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger again due to cooldown
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == first_trigger
 
       # Only one history entry
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert length(history) == 1
     end
 
@@ -120,7 +147,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
 
       trigger_evaluation()
 
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
       first_trigger = updated_alert.last_triggered_at
 
@@ -131,14 +158,14 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should NOT trigger again (still in cooldown)
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == first_trigger
 
       # But last_seen_log_id should have advanced to the latest matching log
       assert updated_alert.last_seen_log_id == log3.id
 
       # Still only one history entry (logs during cooldown were suppressed)
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert length(history) == 1
     end
 
@@ -152,7 +179,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not have triggered
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
       assert updated_alert.last_checked_at == nil
     end
@@ -178,11 +205,11 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Alert should have triggered
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
 
       # Check history
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert length(history) == 1
       [entry] = history
       assert entry.trigger_type == "velocity"
@@ -209,16 +236,16 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not have triggered
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
       assert updated_alert.last_checked_at != nil
 
       # No history
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert history == []
     end
 
-    test "respects window time for counting" do
+    test "uses server-observed time rather than the client event timestamp" do
       user = user_fixture()
 
       # Use a 60 second window
@@ -230,7 +257,8 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
           cooldown_seconds: 60
         )
 
-      # Create old logs (outside window)
+      # A client can submit an old event timestamp, but the alert window is based on
+      # the trusted server-observed inserted_at value.
       old_time = DateTime.add(DateTime.utc_now(), -120, :second)
 
       for i <- 1..5 do
@@ -243,9 +271,9 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
 
       trigger_evaluation()
 
-      # Should not trigger because logs are outside window
-      updated_alert = Alerts.get_alert(user, alert.id)
-      assert updated_alert.last_triggered_at == nil
+      # The newly observed logs count even though their event timestamps are old.
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
+      assert updated_alert.last_triggered_at != nil
     end
 
     test "respects cooldown period" do
@@ -267,7 +295,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # First trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       first_trigger = updated_alert.last_triggered_at
       assert first_trigger != nil
 
@@ -279,11 +307,11 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger again due to cooldown
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == first_trigger
 
       # Only one history entry
-      history = Alerts.list_alert_history(updated_alert)
+      history = Alerts.list_alert_history(user_scope_fixture(user), updated_alert.id)
       assert length(history) == 1
     end
   end
@@ -299,7 +327,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
 
       # Create log in matching source
@@ -308,7 +336,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
     end
 
@@ -324,7 +352,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
 
       # Create matching log
@@ -333,7 +361,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
     end
 
@@ -352,7 +380,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should not trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at == nil
 
       # Create full match
@@ -361,7 +389,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Should trigger
-      updated_alert = Alerts.get_alert(user, alert.id)
+      updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
     end
   end
@@ -383,7 +411,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Check history includes notification info
-      [history] = Alerts.list_alert_history(Alerts.get_alert(user, alert.id))
+      [history] = Alerts.list_alert_history(user_scope_fixture(user), alert.id)
       assert is_list(history.notifications_sent)
       assert length(history.notifications_sent) >= 0
     end
@@ -404,8 +432,8 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       trigger_evaluation()
 
       # Both should be evaluated
-      updated_alert1 = Alerts.get_alert(user, alert1.id)
-      updated_alert2 = Alerts.get_alert(user, alert2.id)
+      updated_alert1 = Alerts.get_alert(user_scope_fixture(user), alert1.id)
+      updated_alert2 = Alerts.get_alert(user_scope_fixture(user), alert2.id)
 
       assert updated_alert1.last_checked_at != nil
       assert updated_alert2.last_checked_at != nil

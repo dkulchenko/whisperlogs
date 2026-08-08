@@ -11,11 +11,16 @@ config :whisperlogs_shipper,
   auth_token: nil,
   # Number of logs to buffer before shipping
   batch_size: 100,
+  max_admitted_events: 10_000,
+  max_admitted_bytes: 33_554_432,
+  max_request_bytes: 7_500_000,
+  max_message_bytes: 65_536,
+  max_metadata_bytes: 131_072,
+  max_metadata_depth: 8,
+  max_event_bytes: 262_144,
   # Maximum time (ms) to wait before flushing buffered logs
   flush_interval_ms: 1_000,
   # HTTP receive timeout (ms)
   receive_timeout: 10_000,
-  # Run tasks synchronously (for testing)
-  inline_tasks: false,
   # Optional source name for identifying this application
   source_name: nil

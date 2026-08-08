@@ -27,6 +27,32 @@ adapter =
 
 config :whisperlogs, :db_adapter, adapter
 
+parse_positive_integer = fn name, default ->
+  value = System.get_env(name) || Integer.to_string(default)
+
+  case Integer.parse(value) do
+    {integer, ""} when integer > 0 -> integer
+    _ -> raise "#{name} must be a positive integer"
+  end
+end
+
+parse_ip = fn name, default ->
+  value = System.get_env(name) || default
+
+  case :inet.parse_address(String.to_charlist(value)) do
+    {:ok, address} -> address
+    {:error, :einval} -> raise "#{name} must be an IP literal"
+  end
+end
+
+parse_hosts = fn value ->
+  case value do
+    nil -> []
+    "" -> []
+    hosts -> String.split(hosts, ",", trim: false) |> Enum.map(&String.trim/1)
+  end
+end
+
 # Always start the server in production mode (for releases/Burrito builds)
 if config_env() == :prod do
   config :whisperlogs, WhisperLogsWeb.Endpoint, server: true
@@ -34,6 +60,15 @@ end
 
 if config_env() == :prod do
   # Database configuration: PostgreSQL if DATABASE_URL is set, otherwise SQLite
+  database_path =
+    if adapter == :sqlite do
+      System.get_env("DATABASE_PATH") ||
+        Path.join(
+          System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"),
+          "whisperlogs/db.sqlite"
+        )
+    end
+
   if database_url = System.get_env("DATABASE_URL") do
     maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
 
@@ -43,43 +78,10 @@ if config_env() == :prod do
       pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
       socket_options: maybe_ipv6
   else
-    # SQLite mode - use XDG_DATA_HOME (defaults to ~/.local/share)
-    db_path =
-      System.get_env("DATABASE_PATH") ||
-        Path.join(
-          System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"),
-          "whisperlogs/db.sqlite"
-        )
-
-    # Platform detection for SQLean regexp extension
-    sqlean_platform =
-      case :os.type() do
-        {:unix, :darwin} ->
-          arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-          if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-            do: "macos-arm64",
-            else: "macos-x64"
-
-        {:unix, :linux} ->
-          arch = :erlang.system_info(:system_architecture) |> List.to_string()
-
-          if String.contains?(arch, "aarch64") or String.contains?(arch, "arm"),
-            do: "linux-arm64",
-            else: "linux-x64"
-
-        {:win32, _} ->
-          "win-x64"
-      end
-
-    regexp_ext =
-      Path.join(
-        :code.priv_dir(:whisperlogs) |> to_string(),
-        "sqlite_extensions/#{sqlean_platform}/regexp"
-      )
+    regexp_ext = WhisperLogs.SQLean.verified_extension_path!()
 
     config :whisperlogs, WhisperLogs.Repo.SQLite,
-      database: db_path,
+      database: database_path,
       load_extensions: [regexp_ext],
       pool_size: 10,
       journal_mode: :wal,
@@ -89,15 +91,49 @@ if config_env() == :prod do
       temp_store: :memory
   end
 
-  # The secret key base is used to sign/encrypt cookies and other secrets.
-  # In SQLite mode (local/single-user), we auto-generate one for zero-config experience.
-  # In PostgreSQL mode (production), require it to be set explicitly.
+  generated_secret_file =
+    if database_path, do: Path.join(Path.dirname(database_path), "secret_key_base")
+
   secret_key_base =
     System.get_env("SECRET_KEY_BASE") ||
       if adapter == :sqlite do
-        # Auto-generate for SQLite mode - sessions won't persist across restarts
-        # but that's acceptable for local single-user deployments
-        :crypto.strong_rand_bytes(64) |> Base.encode64()
+        File.mkdir_p!(Path.dirname(generated_secret_file))
+
+        case File.lstat(generated_secret_file) do
+          {:ok, %{type: :regular, mode: mode}} ->
+            if Bitwise.band(mode, 0o077) != 0 do
+              raise "#{generated_secret_file} must not be group/world accessible"
+            end
+
+          {:ok, _stat} ->
+            raise "#{generated_secret_file} must be a regular, non-symlink file"
+
+          {:error, :enoent} ->
+            secret = :crypto.strong_rand_bytes(64) |> Base.encode64()
+
+            generated_secret_file
+            |> File.open!([:write, :exclusive])
+            |> then(fn io ->
+              try do
+                # The exclusively-created file contains no secret until its mode is private.
+                File.chmod!(generated_secret_file, 0o600)
+                IO.binwrite(io, secret)
+              after
+                File.close(io)
+              end
+            end)
+
+          {:error, reason} ->
+            raise "cannot inspect #{generated_secret_file}: #{inspect(reason)}"
+        end
+
+        value = File.read!(generated_secret_file)
+
+        if byte_size(value) < 64 or byte_size(value) > 1_024 do
+          raise "#{generated_secret_file} must contain 64..1024 bytes"
+        end
+
+        value
       else
         raise """
         environment variable SECRET_KEY_BASE is missing.
@@ -109,17 +145,69 @@ if config_env() == :prod do
 
   config :whisperlogs, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
-  port = String.to_integer(System.get_env("PORT") || "4050")
+  port = parse_positive_integer.("PORT", 4050)
+  bind_ip = parse_ip.("WHISPERLOGS_BIND_IP", "127.0.0.1")
+  loopback_host? = host in ["localhost", "127.0.0.1", "::1", "[::1]"]
 
-  # URL config: use HTTPS/443 when behind a reverse proxy, otherwise HTTP with actual port
+  config :whisperlogs, :secure_cookies, not loopback_host?
+
+  config :whisperlogs, :receiver_limits, %{
+    max_request_bytes: parse_positive_integer.("WHISPERLOGS_MAX_REQUEST_BYTES", 8_000_000),
+    max_batch_size: parse_positive_integer.("WHISPERLOGS_MAX_BATCH_SIZE", 250),
+    max_message_bytes: parse_positive_integer.("WHISPERLOGS_MAX_MESSAGE_BYTES", 65_536),
+    max_metadata_bytes: parse_positive_integer.("WHISPERLOGS_MAX_METADATA_BYTES", 131_072),
+    max_metadata_depth: parse_positive_integer.("WHISPERLOGS_MAX_METADATA_DEPTH", 8),
+    max_event_bytes: parse_positive_integer.("WHISPERLOGS_MAX_EVENT_BYTES", 262_144)
+  }
+
+  config :whisperlogs, :export_limits, %{
+    max_range_days: parse_positive_integer.("WHISPERLOGS_EXPORT_MAX_RANGE_DAYS", 31),
+    max_pending_per_user: parse_positive_integer.("WHISPERLOGS_EXPORT_MAX_PENDING_PER_USER", 2),
+    max_pending_global: parse_positive_integer.("WHISPERLOGS_EXPORT_MAX_PENDING_GLOBAL", 10),
+    max_rows: parse_positive_integer.("WHISPERLOGS_EXPORT_MAX_ROWS", 2_000_000),
+    max_compressed_bytes:
+      parse_positive_integer.("WHISPERLOGS_EXPORT_MAX_COMPRESSED_BYTES", 536_870_912),
+    timeout_seconds: parse_positive_integer.("WHISPERLOGS_EXPORT_TIMEOUT_SECONDS", 1_800)
+  }
+
+  export_root =
+    System.get_env("WHISPERLOGS_EXPORT_ROOT") ||
+      if database_path do
+        Path.join(Path.dirname(database_path), "exports")
+      else
+        raise "WHISPERLOGS_EXPORT_ROOT is required with PostgreSQL"
+      end
+
+  config :whisperlogs, :export_root, export_root
+
+  config :whisperlogs, :alert_limits, %{
+    max_concurrency: parse_positive_integer.("WHISPERLOGS_ALERT_MAX_CONCURRENCY", 2),
+    query_timeout_ms: parse_positive_integer.("WHISPERLOGS_ALERT_QUERY_TIMEOUT_MS", 5_000),
+    cycle_timeout_ms: parse_positive_integer.("WHISPERLOGS_ALERT_CYCLE_TIMEOUT_MS", 20_000)
+  }
+
+  config :whisperlogs, :syslog_limits, %{
+    max_connections: parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_CONNECTIONS", 128),
+    max_connections_per_source:
+      parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_CONNECTIONS_PER_SOURCE", 32),
+    max_frame_bytes: parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_FRAME_BYTES", 65_536),
+    max_queued_per_source:
+      parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_QUEUED_PER_SOURCE", 128),
+    max_queued_global: parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_QUEUED_GLOBAL", 512),
+    ingest_workers: parse_positive_integer.("WHISPERLOGS_SYSLOG_INGEST_WORKERS", 2),
+    idle_timeout_ms: parse_positive_integer.("WHISPERLOGS_SYSLOG_IDLE_TIMEOUT_MS", 300_000),
+    tls_handshake_timeout_ms:
+      parse_positive_integer.("WHISPERLOGS_SYSLOG_TLS_HANDSHAKE_TIMEOUT_MS", 5_000)
+  }
+
+  config :whisperlogs,
+         :s3_allowed_hosts,
+         parse_hosts.(System.get_env("WHISPERLOGS_S3_ALLOWED_HOSTS"))
+
+  # Loopback hosts are the native/Compose HTTP quick start. Other hosts are expected
+  # to sit behind an HTTPS reverse proxy.
   {url_scheme, url_port} =
-    if System.get_env("PHX_HOST") do
-      # Custom host set - assume behind reverse proxy with HTTPS
-      {"https", 443}
-    else
-      # Standalone mode - use HTTP with actual port
-      {"http", port}
-    end
+    if loopback_host?, do: {"http", port}, else: {"https", 443}
 
   # In standalone mode, disable origin checking since users may access via various hostnames
   check_origin = if System.get_env("PHX_HOST"), do: true, else: false
@@ -132,7 +220,7 @@ if config_env() == :prod do
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
       # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0},
+      ip: bind_ip,
       port: port
     ],
     secret_key_base: secret_key_base
