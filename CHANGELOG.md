@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.5.2 - 2026-08-09
+
+- Make the full authenticated interface comfortable and usable on phones while
+  preserving the existing desktop layout.
+- Reflow log entries into readable mobile rows and reorganize the filter bar
+  into touch-friendly wrapped controls with viewport-safe popovers.
+- Stack forms, cards, badges, and action groups across sources, alerts, exports,
+  notification channels, and account screens at narrow widths.
+- Keep charts, dialogs, long values, and data tables within the viewport, using
+  contained horizontal scrolling where tabular content needs its desktop width.
+
 ## v0.5.1 - 2026-08-07
 
 - Fix the production container build by staging the SQLean configuration,

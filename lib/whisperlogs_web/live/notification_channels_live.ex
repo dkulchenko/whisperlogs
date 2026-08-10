@@ -28,7 +28,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
-        <div class="max-w-4xl mx-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto px-4 py-5 md:px-6 md:py-8">
           <.header>
             Notification Channels
             <:subtitle>
@@ -37,12 +37,12 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
             </:subtitle>
           </.header>
 
-          <div class="mt-8 flex flex-wrap gap-3">
+          <div class="mt-8 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <button
               type="button"
               phx-click="toggle_email_form"
               class={[
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors sm:justify-start",
                 "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
                 "border border-accent-purple/30"
               ]}
@@ -53,7 +53,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
               type="button"
               phx-click="toggle_pushover_form"
               class={[
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors sm:justify-start",
                 "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
                 "border border-accent-purple/30"
               ]}
@@ -64,7 +64,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
               type="button"
               phx-click="toggle_slack_form"
               class={[
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors sm:justify-start",
                 "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
                 "border border-accent-purple/30"
               ]}
@@ -76,7 +76,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
           <%!-- Email Form --%>
           <div
             :if={@show_email_form}
-            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
           >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-envelope" class="size-5 text-accent-purple" />
@@ -120,7 +120,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
           <%!-- Pushover Form --%>
           <div
             :if={@show_pushover_form}
-            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
           >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-device-phone-mobile" class="size-5 text-accent-purple" />
@@ -197,7 +197,7 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
           <%!-- Slack Form --%>
           <div
             :if={@show_slack_form}
-            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
           >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-chat-bubble-left-right" class="size-5 text-accent-purple" />
@@ -268,9 +268,9 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
                 id={"channel-row-#{channel.id}"}
                 class="bg-bg-elevated border border-border-default rounded-lg p-4 hover:border-border-subtle transition-colors"
               >
-                <div class="flex items-center justify-between">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-3">
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2 md:gap-3">
                       <.icon name={channel_icon(channel)} class="size-4 text-text-tertiary" />
                       <span class="font-medium text-text-primary">{channel.name}</span>
                       <span class={[
@@ -286,11 +286,11 @@ defmodule WhisperLogsWeb.NotificationChannelsLive do
                         DISABLED
                       </span>
                     </div>
-                    <div class="mt-1.5 text-sm text-text-tertiary">
+                    <div class="mt-1.5 break-words text-sm text-text-tertiary">
                       {channel_details(channel)}
                     </div>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-1 self-start md:gap-2 md:self-auto">
                     <button
                       type="button"
                       phx-click="edit_channel"

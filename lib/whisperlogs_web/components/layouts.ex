@@ -35,46 +35,46 @@ defmodule WhisperLogsWeb.Layouts do
 
   def app(assigns) do
     ~H"""
-    <div class="h-screen bg-bg-base text-text-primary flex flex-col overflow-hidden">
+    <div class="h-dvh md:h-screen bg-bg-base text-text-primary flex flex-col overflow-hidden">
       <header class="flex-shrink-0 border-b border-border-default bg-bg-elevated">
-        <div class="px-4 sm:px-6 lg:px-8 h-10 flex items-center justify-between">
-          <div class="flex items-center gap-4">
+        <div class="px-3 py-2 md:px-6 md:py-0 lg:px-8 md:h-10 flex items-start md:items-center justify-between gap-3">
+          <div class="min-w-0 flex flex-1 flex-col gap-2 md:flex-row md:items-center md:gap-4">
             <a
               href="/"
-              class="flex items-center gap-1.5 text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight"
+              class="flex w-fit items-center gap-1.5 text-sm text-text-primary hover:text-white transition-colors font-semibold tracking-tight"
             >
               <.icon name="hero-chat-bubble-bottom-center-text-solid" class="size-4" /> WhisperLogs
             </a>
 
             <%= if @current_scope do %>
-              <nav class="flex items-center gap-0.5">
+              <nav class="-mx-1 flex w-[calc(100vw-1.5rem)] items-center gap-0.5 overflow-x-auto px-1 pb-0.5 md:mx-0 md:w-auto md:overflow-visible md:px-0 md:pb-0">
                 <.link
                   navigate={~p"/"}
-                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="shrink-0 px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Logs
                 </.link>
                 <.link
                   navigate={~p"/sources"}
-                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="shrink-0 px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Sources
                 </.link>
                 <.link
                   navigate={~p"/metrics"}
-                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="shrink-0 px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Metrics
                 </.link>
                 <.link
                   navigate={~p"/alerts"}
-                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="shrink-0 px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Alerts
                 </.link>
                 <.link
                   navigate={~p"/exports"}
-                  class="px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
+                  class="shrink-0 px-2 py-1 rounded text-smaller font-medium text-text-secondary hover:text-text-primary hover:bg-bg-surface transition-colors"
                 >
                   Exports
                 </.link>
@@ -84,9 +84,9 @@ defmodule WhisperLogsWeb.Layouts do
 
           <%!-- Hide email/logout in SQLite single-user mode --%>
           <%= unless WhisperLogs.DbAdapter.sqlite?() do %>
-            <div class="flex items-center gap-3">
+            <div class="flex shrink-0 items-center gap-3">
               <%= if @current_scope do %>
-                <span class="text-xs text-text-tertiary">{@current_scope.user.email}</span>
+                <span class="hidden text-xs text-text-tertiary md:inline">{@current_scope.user.email}</span>
                 <.link
                   href={~p"/users/log-out"}
                   method="delete"

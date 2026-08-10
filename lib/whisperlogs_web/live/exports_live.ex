@@ -66,7 +66,7 @@ defmodule WhisperLogsWeb.ExportsLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
-        <div class="max-w-4xl mx-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto px-4 py-5 md:px-6 md:py-8">
           <.header>
             Exports
             <:subtitle>
@@ -74,13 +74,13 @@ defmodule WhisperLogsWeb.ExportsLive do
             </:subtitle>
           </.header>
 
-          <div class="mt-8 flex items-center gap-3">
+          <div class="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <button
               :if={!@show_destination_form}
               type="button"
               phx-click="show_destination_form"
               class={[
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors sm:justify-start",
                 "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
                 "border border-accent-purple/30"
               ]}
@@ -92,7 +92,7 @@ defmodule WhisperLogsWeb.ExportsLive do
           <%!-- Destination Form --%>
           <div
             :if={@show_destination_form}
-            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
           >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-cloud-arrow-up" class="size-5 text-accent-purple" />
@@ -135,7 +135,7 @@ defmodule WhisperLogsWeb.ExportsLive do
 
               <%!-- S3 settings --%>
               <div :if={@destination_form[:destination_type].value == "s3"} class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <.input
                     field={@destination_form[:s3_endpoint]}
                     type="select"
@@ -157,7 +157,7 @@ defmodule WhisperLogsWeb.ExportsLive do
                   placeholder="my-logs-bucket"
                   phx-debounce="300"
                 />
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <.input
                     field={@destination_form[:s3_access_key_id]}
                     type="text"
@@ -245,9 +245,9 @@ defmodule WhisperLogsWeb.ExportsLive do
                 id={"destination-row-#{dest.id}"}
                 class="bg-bg-elevated border border-border-default rounded-lg p-4 hover:bg-bg-surface/50 transition-colors"
               >
-                <div class="flex items-center justify-between">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-3">
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2 md:gap-3">
                       <span class="font-medium text-text-primary">{dest.name}</span>
                       <span class={[
                         "px-2 py-0.5 rounded text-xs font-medium",
@@ -269,7 +269,7 @@ defmodule WhisperLogsWeb.ExportsLive do
                         AUTO ({dest.auto_export_age_days}d)
                       </span>
                     </div>
-                    <div class="mt-1.5 text-sm text-text-tertiary font-mono">
+                    <div class="mt-1.5 break-all text-sm text-text-tertiary font-mono">
                       {format_destination_path(dest)}
                     </div>
 
@@ -296,7 +296,7 @@ defmodule WhisperLogsWeb.ExportsLive do
                       <% end %>
                     </div>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-1 self-start md:gap-2 md:self-auto">
                     <button
                       type="button"
                       phx-click="test_connection"
@@ -360,55 +360,57 @@ defmodule WhisperLogsWeb.ExportsLive do
                   <p class="mt-1 text-sm">Exports will appear here when triggered.</p>
                 </div>
               <% else %>
-                <table class="w-full">
-                  <thead class="bg-bg-surface text-text-tertiary text-xs uppercase tracking-wider">
-                    <tr>
-                      <th class="px-4 py-3 text-left">File</th>
-                      <th class="px-4 py-3 text-left">Status</th>
-                      <th class="px-4 py-3 text-left">Logs</th>
-                      <th class="px-4 py-3 text-left">Size</th>
-                      <th class="px-4 py-3 text-left">Trigger</th>
-                      <th class="px-4 py-3 text-left">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-border-default">
-                    <tr :for={job <- @jobs} class="hover:bg-bg-surface/50 transition-colors">
-                      <td class="px-4 py-3 text-sm font-mono text-text-primary">
-                        {job.file_name || "—"}
-                      </td>
-                      <td class="px-4 py-3">
-                        <span class={[
-                          "px-2 py-0.5 rounded text-xs font-medium",
-                          job.status == "pending" && "bg-yellow-500/10 text-yellow-400",
-                          job.status == "running" && "bg-blue-500/10 text-blue-400",
-                          job.status == "completed" && "bg-green-500/10 text-green-400",
-                          job.status == "failed" && "bg-red-500/10 text-red-400"
-                        ]}>
-                          {String.upcase(job.status)}
-                        </span>
-                        <span
-                          :if={job.status == "failed" && job.error_message}
-                          class="block mt-1 text-xs text-red-400 max-w-xs truncate"
-                          title={job.error_message}
-                        >
-                          {job.error_message}
-                        </span>
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-secondary">
-                        {format_count(job.log_count)}
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-secondary">
-                        {format_bytes(job.file_size_bytes)}
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-tertiary">
-                        {job.trigger}
-                      </td>
-                      <td class="px-4 py-3 text-sm text-text-tertiary">
-                        {format_datetime(job.inserted_at)}
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
+                <div class="overflow-x-auto">
+                  <table class="w-full min-w-[680px]">
+                    <thead class="bg-bg-surface text-text-tertiary text-xs uppercase tracking-wider">
+                      <tr>
+                        <th class="px-4 py-3 text-left">File</th>
+                        <th class="px-4 py-3 text-left">Status</th>
+                        <th class="px-4 py-3 text-left">Logs</th>
+                        <th class="px-4 py-3 text-left">Size</th>
+                        <th class="px-4 py-3 text-left">Trigger</th>
+                        <th class="px-4 py-3 text-left">Date</th>
+                      </tr>
+                    </thead>
+                    <tbody class="divide-y divide-border-default">
+                      <tr :for={job <- @jobs} class="hover:bg-bg-surface/50 transition-colors">
+                        <td class="px-4 py-3 text-sm font-mono text-text-primary">
+                          {job.file_name || "—"}
+                        </td>
+                        <td class="px-4 py-3">
+                          <span class={[
+                            "px-2 py-0.5 rounded text-xs font-medium",
+                            job.status == "pending" && "bg-yellow-500/10 text-yellow-400",
+                            job.status == "running" && "bg-blue-500/10 text-blue-400",
+                            job.status == "completed" && "bg-green-500/10 text-green-400",
+                            job.status == "failed" && "bg-red-500/10 text-red-400"
+                          ]}>
+                            {String.upcase(job.status)}
+                          </span>
+                          <span
+                            :if={job.status == "failed" && job.error_message}
+                            class="block mt-1 text-xs text-red-400 max-w-xs truncate"
+                            title={job.error_message}
+                          >
+                            {job.error_message}
+                          </span>
+                        </td>
+                        <td class="px-4 py-3 text-sm text-text-secondary">
+                          {format_count(job.log_count)}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-text-secondary">
+                          {format_bytes(job.file_size_bytes)}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-text-tertiary">
+                          {job.trigger}
+                        </td>
+                        <td class="px-4 py-3 text-sm text-text-tertiary">
+                          {format_datetime(job.inserted_at)}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               <% end %>
             </div>
           </div>
@@ -416,11 +418,11 @@ defmodule WhisperLogsWeb.ExportsLive do
           <%!-- Export Modal --%>
           <div
             :if={@show_export_modal}
-            class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+            class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
             phx-click="hide_export_modal"
           >
             <div
-              class="bg-bg-elevated border border-border-default rounded-lg p-6 w-full max-w-md"
+              class="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
               phx-click-away="hide_export_modal"
             >
               <div class="flex items-center gap-2 mb-4">
@@ -443,7 +445,7 @@ defmodule WhisperLogsWeb.ExportsLive do
               >
                 <input type="hidden" name="destination_id" value={@selected_destination} />
 
-                <div class="grid grid-cols-2 gap-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <.input
                     field={@export_form[:from_date]}
                     type="date"

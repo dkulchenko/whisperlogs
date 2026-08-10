@@ -171,7 +171,7 @@ defmodule WhisperLogsWeb.LogsLive do
               class="group hover:bg-bg-elevated/50 cursor-pointer transition-colors"
               phx-click={JS.toggle(to: "##{dom_id}-details")}
             >
-              <div class="px-4 py-1 flex items-center gap-3 font-mono text-xs">
+              <div class="px-3 py-2 md:px-4 md:py-1 flex flex-wrap md:flex-nowrap items-center gap-x-2 gap-y-1 md:gap-3 font-mono text-xs">
                 <%!-- Timestamp --%>
                 <span class="flex-shrink-0 text-text-tertiary text-xs tabular-nums">
                   {format_timestamp(log.timestamp)}
@@ -191,7 +191,7 @@ defmodule WhisperLogsWeb.LogsLive do
                 </span>
 
                 <%!-- Message + Metadata --%>
-                <span class="flex-1 break-all leading-relaxed">
+                <span class="basis-full break-all leading-relaxed md:basis-auto md:flex-1">
                   <span class="text-text-primary whitespace-pre-wrap">{log.message}</span>
                   <%= if log.metadata != %{} do %>
                     <span class="text-text-tertiary ml-2">
@@ -207,7 +207,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   phx-click="view-in-context"
                   phx-value-id={log.id}
                   phx-value-timestamp={DateTime.to_iso8601(log.inserted_at)}
-                  class="flex-shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-bg-surface transition-all"
+                  class="ml-auto flex-shrink-0 p-1 rounded opacity-100 md:ml-0 md:opacity-0 md:group-hover:opacity-100 hover:bg-bg-surface transition-all"
                   title="View in context"
                 >
                   <.icon
@@ -219,18 +219,18 @@ defmodule WhisperLogsWeb.LogsLive do
                 <%!-- Expand indicator --%>
                 <.icon
                   name="hero-chevron-down"
-                  class="flex-shrink-0 size-4 text-text-tertiary opacity-0 group-hover:opacity-100 transition-opacity"
+                  class="flex-shrink-0 size-4 text-text-tertiary opacity-60 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
                 />
               </div>
 
               <%!-- Expanded details --%>
               <div
                 id={"#{dom_id}-details"}
-                class="hidden border-t border-border-subtle bg-bg-surface/50 px-4 py-3 ml-[72px] mr-4 mb-2 rounded-lg"
+                class="hidden border-t border-border-subtle bg-bg-surface/50 px-3 py-3 mx-3 mb-2 rounded-lg md:px-4 md:ml-[72px] md:mr-4"
               >
-                <div class="flex items-start justify-between gap-6">
+                <div class="flex flex-col items-stretch gap-4 md:flex-row md:items-start md:justify-between md:gap-6">
                   <%!-- Timestamps --%>
-                  <div class="flex items-center gap-6 text-xs">
+                  <div class="flex flex-col gap-2 text-xs sm:flex-row sm:items-center md:gap-6">
                     <div>
                       <span class="text-text-tertiary">Logged</span>
                       <span class="ml-2 font-mono text-text-secondary">
@@ -255,7 +255,7 @@ defmodule WhisperLogsWeb.LogsLive do
                   </div>
 
                   <%!-- Actions --%>
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-2">
                     <%= if log.metadata["request_id"] do %>
                       <button
                         type="button"
@@ -309,7 +309,7 @@ defmodule WhisperLogsWeb.LogsLive do
         <button
           :if={@far_from_bottom? or @has_newer?}
           phx-click="jump-to-latest"
-          class="absolute bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-bg-elevated text-purple-400 text-xs font-medium rounded-full shadow-lg hover:bg-bg-surface transition-colors border border-purple-500/30"
+          class="absolute bottom-36 md:bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-bg-elevated text-purple-400 text-xs font-medium rounded-full shadow-lg hover:bg-bg-surface transition-colors border border-purple-500/30"
         >
           <.icon name="hero-arrow-down" class="size-4" /> Jump to latest
         </button>
@@ -319,11 +319,11 @@ defmodule WhisperLogsWeb.LogsLive do
           id="filters-form"
           phx-change="filter"
           phx-submit="filter"
-          class="flex-shrink-0 border-t border-border-default bg-bg-elevated px-4 py-2.5"
+          class="flex-shrink-0 border-t border-border-default bg-bg-elevated px-3 py-2 md:px-4 md:py-2.5"
         >
-          <div class="flex items-center gap-4">
+          <div class="flex flex-wrap items-center gap-2 md:flex-nowrap md:gap-4">
             <%!-- Search with time range --%>
-            <div class="relative flex-1">
+            <div class="relative w-full md:flex-1">
               <div class="flex items-center bg-bg-surface border border-border-default rounded-lg focus-within:border-text-tertiary transition-colors">
                 <.icon
                   name="hero-magnifying-glass"
@@ -383,7 +383,7 @@ defmodule WhisperLogsWeb.LogsLive do
               <%!-- Search help popover --%>
               <div
                 id="search-help-popover"
-                class="hidden absolute bottom-full left-0 mb-2 w-80 p-4 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50"
+                class="hidden absolute bottom-full left-0 mb-2 w-[calc(100vw-1.5rem)] max-w-80 p-4 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50"
                 phx-click-away={JS.hide(to: "#search-help-popover")}
               >
                 <div class="flex items-center justify-between mb-3">
@@ -526,11 +526,11 @@ defmodule WhisperLogsWeb.LogsLive do
             </div>
 
             <%!-- Level filter --%>
-            <div class="flex gap-1.5">
+            <div class="flex flex-1 gap-1.5 md:flex-none">
               <label
                 :for={level <- ~w(debug info warning error)}
                 class={[
-                  "px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all border",
+                  "flex-1 md:flex-none text-center px-2 md:px-2.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-all border",
                   level_selected?(@filters.levels, level) && level_filter_bg(level),
                   !level_selected?(@filters.levels, level) &&
                     "bg-bg-surface border-border-default text-text-tertiary hover:text-text-secondary hover:border-border-subtle"
@@ -575,10 +575,10 @@ defmodule WhisperLogsWeb.LogsLive do
               </button>
               <div
                 id="scroll-to-popover"
-                class="hidden absolute bottom-full right-0 mb-2 p-3 bg-bg-elevated border border-border-default rounded-lg shadow-lg z-50"
+                class="hidden fixed inset-x-3 bottom-28 mb-2 p-3 bg-bg-elevated border border-border-default rounded-lg shadow-lg z-50 md:absolute md:inset-x-auto md:bottom-full md:right-0 md:w-auto"
                 phx-click-away={JS.hide(to: "#scroll-to-popover")}
               >
-                <div class="flex items-center gap-2">
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <input
                     type="date"
                     id="scroll-to-date"
@@ -659,7 +659,7 @@ defmodule WhisperLogsWeb.LogsLive do
 
               <div
                 id="saved-searches-popover"
-                class="hidden absolute bottom-full right-0 mb-2 w-72 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50"
+                class="hidden fixed inset-x-3 bottom-28 mb-2 bg-bg-elevated border border-border-default rounded-lg shadow-xl z-50 md:absolute md:inset-x-auto md:bottom-full md:right-0 md:w-72"
                 phx-click-away={JS.hide(to: "#saved-searches-popover")}
               >
                 <div class="p-3">

@@ -115,7 +115,7 @@ defmodule WhisperLogsWeb.MetricsLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
-        <div class="max-w-6xl mx-auto px-6 py-8">
+        <div class="max-w-6xl mx-auto px-4 py-5 md:px-6 md:py-8">
           <.header>
             Metrics
             <:subtitle>
@@ -179,7 +179,7 @@ defmodule WhisperLogsWeb.MetricsLive do
             </div>
 
             <%!-- Volume Chart --%>
-            <div class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6">
+            <div class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6">
               <h3 class="text-lg font-semibold text-text-primary mb-4">
                 Log Volume - {String.capitalize(@time_range)}
               </h3>
@@ -187,14 +187,14 @@ defmodule WhisperLogsWeb.MetricsLive do
                 id="volume-chart"
                 phx-hook=".VolumeChart"
                 phx-update="ignore"
-                class="w-full h-80"
+                class="w-full h-64 md:h-80"
               >
               </div>
             </div>
 
             <%!-- Data Table --%>
             <div class="mt-8 bg-bg-elevated border border-border-default rounded-lg overflow-hidden">
-              <div class="px-6 py-4 border-b border-border-default">
+              <div class="px-4 py-4 border-b border-border-default md:px-6">
                 <h3 class="text-lg font-semibold text-text-primary">
                   Volume Breakdown
                 </h3>
@@ -203,13 +203,13 @@ defmodule WhisperLogsWeb.MetricsLive do
                 <table class="w-full">
                   <thead class="bg-bg-surface">
                     <tr>
-                      <th class="px-6 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                      <th class="px-4 py-3 text-left text-xs font-medium text-text-tertiary uppercase tracking-wider md:px-6">
                         Period
                       </th>
-                      <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                      <th class="px-4 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider md:px-6">
                         Log Count
                       </th>
-                      <th class="px-6 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider">
+                      <th class="px-4 py-3 text-right text-xs font-medium text-text-tertiary uppercase tracking-wider md:px-6">
                         Volume
                       </th>
                     </tr>
@@ -219,13 +219,13 @@ defmodule WhisperLogsWeb.MetricsLive do
                       :for={{period, count, bytes} <- table_data(@time_range, assigns)}
                       class="hover:bg-bg-surface/50"
                     >
-                      <td class="px-6 py-3 text-sm text-text-primary font-mono">
+                      <td class="whitespace-nowrap px-4 py-3 text-sm text-text-primary font-mono md:px-6">
                         {format_period(period, @time_range)}
                       </td>
-                      <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
+                      <td class="whitespace-nowrap px-4 py-3 text-sm text-text-secondary text-right tabular-nums md:px-6">
                         {format_count(count)}
                       </td>
-                      <td class="px-6 py-3 text-sm text-text-secondary text-right tabular-nums">
+                      <td class="whitespace-nowrap px-4 py-3 text-sm text-text-secondary text-right tabular-nums md:px-6">
                         {format_bytes(bytes || 0)}
                       </td>
                     </tr>
@@ -355,7 +355,7 @@ defmodule WhisperLogsWeb.MetricsLive do
 
   defp stat_card(assigns) do
     ~H"""
-    <div class="bg-bg-elevated border border-border-default rounded-lg p-5">
+    <div class="bg-bg-elevated border border-border-default rounded-lg p-4 md:p-5">
       <div class="flex items-center gap-3">
         <div class="p-2 bg-accent-purple/10 rounded-lg">
           <.icon name={@icon} class="size-5 text-accent-purple" />

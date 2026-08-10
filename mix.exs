@@ -4,7 +4,7 @@ defmodule WhisperLogs.MixProject do
   def project do
     [
       app: :whisperlogs,
-      version: "0.5.1",
+      version: "0.5.2",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,

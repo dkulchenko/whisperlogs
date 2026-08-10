@@ -35,7 +35,7 @@ defmodule WhisperLogsWeb.SourcesLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
-        <div class="max-w-4xl mx-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto px-4 py-5 md:px-6 md:py-8">
           <.header>
             Sources
             <:subtitle>
@@ -48,7 +48,7 @@ defmodule WhisperLogsWeb.SourcesLive do
             <%!-- HTTP Source Form --%>
             <div
               :if={@editing_source == nil || @editing_source.type == "http"}
-              class="bg-bg-elevated border border-border-default rounded-lg p-6"
+              class="bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
             >
               <div class="flex items-center gap-2 mb-4">
                 <.icon name="hero-globe-alt" class="size-5 text-accent-purple" />
@@ -101,7 +101,7 @@ defmodule WhisperLogsWeb.SourcesLive do
             <%!-- Syslog Source Form --%>
             <div
               :if={@editing_source == nil || @editing_source.type == "syslog"}
-              class="bg-bg-elevated border border-border-default rounded-lg p-6"
+              class="bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
             >
               <div class="flex items-center gap-2 mb-4">
                 <.icon name="hero-server" class="size-5 text-accent-purple" />
@@ -132,7 +132,7 @@ defmodule WhisperLogsWeb.SourcesLive do
                   disabled={@editing_source != nil}
                   id="syslog-source-id"
                 />
-                <div class="grid grid-cols-2 gap-3">
+                <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <.input
                     field={@syslog_form[:port]}
                     type="number"
@@ -229,9 +229,9 @@ defmodule WhisperLogsWeb.SourcesLive do
                 id={"source-row-#{source.id}"}
                 class="bg-bg-elevated border border-border-default rounded-lg p-4 hover:border-border-subtle transition-colors"
               >
-                <div class="flex items-center justify-between">
-                  <div class="flex-1">
-                    <div class="flex items-center gap-3">
+                <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex flex-wrap items-center gap-2 md:gap-3">
                       <%= if source.type == "http" do %>
                         <.icon name="hero-globe-alt" class="size-4 text-text-tertiary" />
                       <% else %>
@@ -249,7 +249,7 @@ defmodule WhisperLogsWeb.SourcesLive do
                         {String.upcase(source.type)}
                       </span>
                     </div>
-                    <div class="mt-1.5 flex items-center gap-4 text-sm text-text-tertiary">
+                    <div class="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-tertiary">
                       <span>Created {Calendar.strftime(source.inserted_at, "%b %d, %Y")}</span>
                       <%= if source.type == "syslog" do %>
                         <span class="font-mono text-accent-purple">
@@ -259,7 +259,7 @@ defmodule WhisperLogsWeb.SourcesLive do
                       <% end %>
                     </div>
                   </div>
-                  <div class="flex items-center gap-2">
+                  <div class="flex flex-wrap items-center gap-1 self-start md:gap-2 md:self-auto">
                     <button
                       type="button"
                       phx-click="edit_source"
@@ -299,10 +299,10 @@ defmodule WhisperLogsWeb.SourcesLive do
                   </div>
                 </div>
                 <%= if source.type == "http" and @revealed_key_id == source.id do %>
-                  <div class="mt-4 flex items-center gap-2">
+                  <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
                     <code
                       id={"source-key-#{source.id}"}
-                      class="flex-1 bg-bg-base border border-border-default px-4 py-2.5 rounded-lg font-mono text-sm text-text-primary select-all"
+                      class="min-w-0 flex-1 overflow-x-auto bg-bg-base border border-border-default px-4 py-2.5 rounded-lg font-mono text-sm text-text-primary select-all"
                     >
                       {source.key}
                     </code>

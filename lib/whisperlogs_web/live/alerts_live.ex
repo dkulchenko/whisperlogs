@@ -49,7 +49,7 @@ defmodule WhisperLogsWeb.AlertsLive do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
       <div class="flex-1 overflow-y-auto">
-        <div class="max-w-4xl mx-auto px-6 py-8">
+        <div class="max-w-4xl mx-auto px-4 py-5 md:px-6 md:py-8">
           <.header>
             Alerts
             <:subtitle>
@@ -57,13 +57,13 @@ defmodule WhisperLogsWeb.AlertsLive do
             </:subtitle>
           </.header>
 
-          <div class="mt-8 flex items-center gap-3">
+          <div class="mt-8 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
             <button
               :if={!@show_form}
               type="button"
               phx-click="show_form"
               class={[
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors",
+                "flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm transition-colors sm:justify-start",
                 "bg-accent-purple/10 text-accent-purple hover:bg-accent-purple/20",
                 "border border-accent-purple/30"
               ]}
@@ -73,7 +73,7 @@ defmodule WhisperLogsWeb.AlertsLive do
             <.link
               :if={!@show_form}
               navigate={~p"/notification-channels"}
-              class="flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surface border border-border-default transition-colors"
+              class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-medium text-sm text-text-secondary hover:text-text-primary hover:bg-bg-surface border border-border-default transition-colors sm:justify-start"
             >
               <.icon name="hero-bell" class="size-4" /> Notification Channels
             </.link>
@@ -82,7 +82,7 @@ defmodule WhisperLogsWeb.AlertsLive do
           <%!-- Alert Form --%>
           <div
             :if={@show_form}
-            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-6"
+            class="mt-6 bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6"
           >
             <div class="flex items-center gap-2 mb-4">
               <.icon name="hero-bell-alert" class="size-5 text-accent-purple" />
@@ -123,7 +123,7 @@ defmodule WhisperLogsWeb.AlertsLive do
                   phx-debounce="300"
                 />
                 <%!-- Match counts preview --%>
-                <div class="mt-2 flex items-center gap-4 text-sm">
+                <div class="mt-2 flex flex-wrap items-center gap-2 md:gap-4 text-sm">
                   <%= if @counting do %>
                     <span class="text-text-tertiary flex items-center gap-1.5">
                       <span class="inline-block w-3 h-3 border-2 border-accent-purple/50 border-t-accent-purple rounded-full animate-spin"></span>
@@ -172,7 +172,10 @@ defmodule WhisperLogsWeb.AlertsLive do
                 ]}
               />
 
-              <div :if={@form[:alert_type].value == "velocity"} class="grid grid-cols-2 gap-4">
+              <div
+                :if={@form[:alert_type].value == "velocity"}
+                class="grid grid-cols-1 gap-4 sm:grid-cols-2"
+              >
                 <.input
                   field={@form[:velocity_threshold]}
                   type="number"
@@ -284,9 +287,9 @@ defmodule WhisperLogsWeb.AlertsLive do
                 class="bg-bg-elevated border border-border-default rounded-lg overflow-hidden"
               >
                 <div class="p-4 hover:bg-bg-surface/50 transition-colors">
-                  <div class="flex items-center justify-between">
-                    <div class="flex-1">
-                      <div class="flex items-center gap-3">
+                  <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div class="min-w-0 flex-1">
+                      <div class="flex flex-wrap items-center gap-2 md:gap-3">
                         <span class="font-medium text-text-primary">{alert.name}</span>
                         <span class={[
                           "px-2 py-0.5 rounded text-xs font-medium",
@@ -302,10 +305,10 @@ defmodule WhisperLogsWeb.AlertsLive do
                           DISABLED
                         </span>
                       </div>
-                      <div class="mt-1.5 text-sm text-text-tertiary font-mono">
+                      <div class="mt-1.5 break-words text-sm text-text-tertiary font-mono">
                         {alert.search_query}
                       </div>
-                      <div class="mt-1 flex items-center gap-4 text-sm text-text-tertiary">
+                      <div class="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-text-tertiary">
                         <%= if alert.alert_type == "velocity" do %>
                           <span>
                             ≥ {alert.velocity_threshold} in {format_window(
@@ -323,7 +326,7 @@ defmodule WhisperLogsWeb.AlertsLive do
                         </span>
                       </div>
                     </div>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap items-center gap-1 self-start md:gap-2 md:self-auto">
                       <button
                         type="button"
                         phx-click="toggle_history"
@@ -381,7 +384,7 @@ defmodule WhisperLogsWeb.AlertsLive do
                         class="flex items-start gap-3 p-2 bg-bg-base rounded border border-border-default"
                       >
                         <div class="flex-1 min-w-0">
-                          <div class="flex items-center gap-2 text-sm">
+                          <div class="flex flex-wrap items-center gap-2 text-sm">
                             <span class="text-text-primary font-medium">
                               {format_trigger_type(entry.trigger_type)}
                             </span>

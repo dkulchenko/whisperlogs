@@ -7,7 +7,7 @@ defmodule WhisperLogsWeb.UserLive.Login do
   def render(assigns) do
     ~H"""
     <Layouts.app flash={@flash} current_scope={@current_scope}>
-      <div class="mx-auto max-w-sm py-12 space-y-6">
+      <div class="mx-auto w-full max-w-sm px-4 py-8 space-y-6 md:px-0 md:py-12">
         <div class="text-center">
           <.header>
             <p>Log in</p>
@@ -27,7 +27,7 @@ defmodule WhisperLogsWeb.UserLive.Login do
           </.header>
         </div>
 
-        <div class="bg-bg-elevated border border-border-default rounded-lg p-6">
+        <div class="bg-bg-elevated border border-border-default rounded-lg p-4 md:p-6">
           <.form
             :let={f}
             for={@form}
