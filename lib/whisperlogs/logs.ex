@@ -7,7 +7,7 @@ defmodule WhisperLogs.Logs do
 
   alias WhisperLogs.DbAdapter
   alias WhisperLogs.Repo
-  alias WhisperLogs.Accounts.User
+  alias WhisperLogs.Accounts.{Scope, User}
   alias WhisperLogs.Logs.Log
   alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
@@ -225,6 +225,58 @@ defmodule WhisperLogs.Logs do
     |> apply_filters(opts)
     |> limit(^limit)
     |> Repo.all()
+  end
+
+  @doc """
+  Searches the shared log workspace for an authenticated caller.
+
+  The query uses the same grammar as the Logs LiveView. Results are newest first and
+  return one extra row internally to report whether another page exists.
+  """
+  def search_logs(scope, search, opts \\ [])
+
+  def search_logs(%Scope{user: %User{}}, search, opts) when is_binary(search) do
+    limits = WhisperLogs.Config.mcp_limits()
+    limit = Keyword.get(opts, :limit, 50)
+    before = Keyword.get(opts, :before)
+    trimmed = String.trim(search)
+
+    cond do
+      byte_size(search) > limits.max_query_bytes ->
+        {:error, :query_too_large}
+
+      not is_integer(limit) or limit < 1 or limit > 100 ->
+        {:error, :invalid_limit}
+
+      true ->
+        case SearchParser.parse(search) do
+          {:ok, []} when trimmed != "" ->
+            {:error, :invalid_query}
+
+          {:ok, tokens} ->
+            query =
+              Log
+              |> maybe_before(before)
+              |> order_by([l], desc: l.inserted_at, desc: l.id)
+              |> apply_search_tokens(tokens)
+              |> limit(^(limit + 1))
+
+            logs = Repo.all(query, timeout: limits.query_timeout_ms)
+            {:ok, %{logs: Enum.take(logs, limit), has_more: length(logs) > limit}}
+        end
+    end
+  end
+
+  def search_logs(_scope, _search, _opts), do: {:error, :unauthorized}
+
+  defp maybe_before(query, nil), do: query
+
+  defp maybe_before(query, {inserted_at, id}) do
+    where(
+      query,
+      [l],
+      l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id)
+    )
   end
 
   @doc """

@@ -1,5 +1,38 @@
 # Changelog
 
+## v0.6.0 - 2026-08-11
+
+### OAuth MCP log search
+
+- Add a native, stateless Streamable HTTP MCP endpoint at `/mcp`, targeting the
+  2026-07-28 protocol revision and exposing one read-only `search_logs` tool.
+- Reuse WhisperLogs' existing search grammar with bounded pagination, encrypted
+  query-bound cursors, database query deadlines, and response-size limits.
+- Add OAuth 2.1 authorization-code authentication with PKCE S256, protected
+  resource and authorization-server metadata, Client ID Metadata Documents,
+  and a signed stateless dynamic-registration fallback for compatible clients.
+- Issue one-hour access tokens and rotating 30-day refresh tokens as hashed
+  opaque credentials. Revoke an entire grant on refresh-token replay, account
+  password changes, or user-initiated connected-app revocation.
+- Add an authenticated consent screen and a Connected apps section under user
+  settings for reviewing and revoking MCP access.
+- Harden remote client metadata retrieval against SSRF with HTTPS-only public
+  destinations, DNS validation and address pinning, disabled redirects, finite
+  deadlines, and bounded response bodies.
+- Extend retention cleanup and the SQLite-to-PostgreSQL migrator to cover OAuth
+  grants and tokens, and document public deployment, Codex setup, runtime
+  limits, and the OAuth security model.
+
+### Upgrade notes
+
+- Run the included database migration before serving MCP traffic. It creates the
+  OAuth grants and tokens tables on both supported database adapters.
+- Public OAuth discovery and callbacks require an accurate `PHX_HOST` and HTTPS
+  at the browser-facing boundary.
+- Review the new `WHISPERLOGS_MCP_QUERY_TIMEOUT_MS`,
+  `WHISPERLOGS_MCP_MAX_RESPONSE_BYTES`, and
+  `WHISPERLOGS_MCP_MAX_QUERY_BYTES` limits before enabling remote access.
+
 ## v0.5.2 - 2026-08-09
 
 - Make the full authenticated interface comfortable and usable on phones while

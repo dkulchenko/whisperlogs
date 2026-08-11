@@ -295,6 +295,7 @@ defmodule WhisperLogs.Accounts do
         tokens_to_expire = Repo.all_by(UserToken, user_id: user.id)
 
         Repo.delete_all(from(t in UserToken, where: t.id in ^Enum.map(tokens_to_expire, & &1.id)))
+        :ok = WhisperLogs.OAuth.revoke_all_for_user(user)
 
         {:ok, {user, tokens_to_expire}}
       end

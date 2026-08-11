@@ -20,6 +20,35 @@ sources, alerts, notification channels, export destinations, and export jobs are
 Source bearer keys authenticate only enabled, non-revoked HTTP sources. Public registration is an
 explicit application setting and can never create an administrator.
 
+## OAuth and MCP
+
+`POST /mcp` implements only the stateless MCP `2026-07-28` protocol and exposes the single
+read-only `search_logs` tool. Every request requires an OAuth bearer token scoped to `logs:read`,
+the exact `/mcp` resource indicator, matching protocol/body mirror headers, and a valid `Origin`
+when that header is present. Discovery and token endpoints use the unauthenticated JSON pipeline;
+consent uses the authenticated browser pipeline and its CSRF protection.
+
+Authorization codes expire after five minutes and require PKCE S256. Access tokens expire after
+one hour. Refresh tokens rotate and expire after 30 days; replay of a consumed refresh token
+revokes the complete grant. Only SHA-256 credential hashes are stored. Reauthorization,
+user-initiated revocation, and password changes invalidate existing credentials. Expired OAuth
+records and grants revoked for more than 90 days are removed by daily retention.
+
+CIMD fetches require an HTTPS URL with a path, disable redirects, pin a DNS result after rejecting
+non-public addresses, and enforce time/body limits. Deprecated DCR remains available as a
+compatibility fallback and returns server-signed stateless public client IDs. Redirect URIs must
+match exactly; HTTPS is required except for loopback HTTP callbacks used by native clients.
+
+| Variable | Default |
+| --- | ---: |
+| `WHISPERLOGS_MCP_QUERY_TIMEOUT_MS` | 5000 |
+| `WHISPERLOGS_MCP_MAX_RESPONSE_BYTES` | 1048576 |
+| `WHISPERLOGS_MCP_MAX_QUERY_BYTES` | 4096 |
+
+The response limit must be large enough for one complete maximum-sized log plus the MCP structured
+content compatibility copy. Pagination cursors are encrypted, expire after 24 hours, and are bound
+to the authorizing user and exact query.
+
 ## Ingestion and time
 
 `timestamp` is producer-supplied event time. `inserted_at` is trusted server-observed time and

@@ -12,6 +12,7 @@ defmodule WhisperLogs.Config do
     validate_receiver!()
     validate_exports!()
     validate_alerts!()
+    validate_mcp!()
     validate_syslog!()
     validate_s3_hosts!()
     reject_dns_cluster!()
@@ -21,6 +22,7 @@ defmodule WhisperLogs.Config do
   def receiver_limits, do: Application.fetch_env!(@app, :receiver_limits)
   def export_limits, do: Application.fetch_env!(@app, :export_limits)
   def alert_limits, do: Application.fetch_env!(@app, :alert_limits)
+  def mcp_limits, do: Application.fetch_env!(@app, :mcp_limits)
   def syslog_limits, do: Application.fetch_env!(@app, :syslog_limits)
   def s3_allowed_hosts, do: Application.fetch_env!(@app, :s3_allowed_hosts)
   def export_root, do: Application.fetch_env!(@app, :export_root)
@@ -92,6 +94,21 @@ defmodule WhisperLogs.Config do
     require!(
       limits.max_concurrency <= pool_size,
       "alert concurrency exceeds the selected database pool"
+    )
+  end
+
+  defp validate_mcp! do
+    limits = mcp_limits()
+    positive!(limits, [:query_timeout_ms, :max_response_bytes, :max_query_bytes])
+
+    require!(
+      limits.max_response_bytes >= 65_536,
+      "MCP response limit must be at least 65536 bytes"
+    )
+
+    require!(
+      limits.max_response_bytes >= receiver_limits().max_event_bytes * 2 + 16_384,
+      "MCP response limit must fit one complete log plus structured-content compatibility copy"
     )
   end
 

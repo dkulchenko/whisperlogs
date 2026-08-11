@@ -58,6 +58,12 @@ config :whisperlogs, :alert_limits, %{
   cycle_timeout_ms: 20_000
 }
 
+config :whisperlogs, :mcp_limits, %{
+  query_timeout_ms: 5_000,
+  max_response_bytes: 1_048_576,
+  max_query_bytes: 4_096
+}
+
 config :whisperlogs, :syslog_limits, %{
   max_connections: 128,
   max_connections_per_source: 32,

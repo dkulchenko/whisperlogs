@@ -4,6 +4,7 @@ defmodule WhisperLogsWeb.UserLive.Settings do
   on_mount {WhisperLogsWeb.UserAuth, :require_sudo_mode}
 
   alias WhisperLogs.Accounts
+  alias WhisperLogs.OAuth
 
   @impl true
   def render(assigns) do
@@ -28,7 +29,7 @@ defmodule WhisperLogsWeb.UserLive.Settings do
           <.button variant="primary" phx-disable-with="Changing...">Change Email</.button>
         </.form>
 
-        <div class="divider" />
+        <div class="my-8 border-t border-slate-200 dark:border-slate-800" />
 
         <.form
           for={@password_form}
@@ -63,6 +64,52 @@ defmodule WhisperLogsWeb.UserLive.Settings do
             Save Password
           </.button>
         </.form>
+
+        <div class="my-8 border-t border-slate-200 dark:border-slate-800" />
+
+        <section id="connected-apps-section" class="space-y-5 py-2">
+          <div>
+            <h2 class="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
+              Connected apps
+            </h2>
+            <p class="mt-1 text-sm leading-6 text-slate-600 dark:text-slate-300">
+              Apps listed here can search your shared log workspace. Revoke anything you no longer use.
+            </p>
+          </div>
+
+          <div id="connected-apps" phx-update="stream" class="space-y-3">
+            <div
+              id="connected-apps-empty"
+              class="hidden rounded-2xl border border-dashed border-slate-300 px-5 py-8 text-center text-sm text-slate-500 only:block dark:border-slate-700 dark:text-slate-400"
+            >
+              No apps are connected.
+            </div>
+            <article
+              :for={{dom_id, grant} <- @streams.oauth_grants}
+              id={dom_id}
+              class="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-950 sm:flex-row sm:items-center sm:justify-between"
+            >
+              <div class="min-w-0">
+                <p class="truncate font-semibold text-slate-950 dark:text-white">
+                  {grant.client_name}
+                </p>
+                <p class="mt-1 truncate text-xs text-slate-500 dark:text-slate-400">
+                  {URI.parse(grant.redirect_uri).host} · Read-only log search
+                </p>
+              </div>
+              <button
+                id={"revoke-oauth-grant-#{grant.id}"}
+                type="button"
+                phx-click="revoke_oauth_grant"
+                phx-value-id={grant.id}
+                data-confirm="Revoke this app's access to WhisperLogs?"
+                class="shrink-0 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 dark:border-rose-900 dark:text-rose-300 dark:hover:bg-rose-950/50"
+              >
+                Revoke
+              </button>
+            </article>
+          </div>
+        </section>
       </div>
     </Layouts.app>
     """
@@ -93,6 +140,7 @@ defmodule WhisperLogsWeb.UserLive.Settings do
       |> assign(:email_form, to_form(email_changeset))
       |> assign(:password_form, to_form(password_changeset))
       |> assign(:trigger_submit, false)
+      |> stream(:oauth_grants, OAuth.list_grants(socket.assigns.current_scope))
 
     {:ok, socket}
   end
@@ -154,6 +202,20 @@ defmodule WhisperLogsWeb.UserLive.Settings do
 
       changeset ->
         {:noreply, assign(socket, password_form: to_form(changeset, action: :insert))}
+    end
+  end
+
+  def handle_event("revoke_oauth_grant", %{"id" => id}, socket) do
+    with {grant_id, ""} <- Integer.parse(id),
+         grant when not is_nil(grant) <-
+           Enum.find(OAuth.list_grants(socket.assigns.current_scope), &(&1.id == grant_id)),
+         :ok <- OAuth.revoke_grant(socket.assigns.current_scope, grant_id) do
+      {:noreply,
+       socket
+       |> stream_delete(:oauth_grants, grant)
+       |> put_flash(:info, "Connected app access revoked.")}
+    else
+      _ -> {:noreply, put_flash(socket, :error, "Connected app could not be revoked.")}
     end
   end
 end

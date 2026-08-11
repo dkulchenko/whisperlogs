@@ -70,6 +70,27 @@ Collect logs from anywhere:
 - **Syslog** - RFC 3164 and RFC 5424 support (UDP/TCP)
 - **Elixir Shipper** - bounded Logger integration with finite HTTP timeouts and retries
 
+### OAuth MCP log search
+
+WhisperLogs exposes one read-only remote MCP tool, `search_logs`, over stateless Streamable HTTP.
+It uses the MCP `2026-07-28` protocol and OAuth 2.1 authorization-code flow with PKCE. Any signed-in
+WhisperLogs user may approve a client; connected clients can only read the same shared log corpus
+available in the web log viewer. Connections can be revoked under **Account Settings → Connected
+apps**.
+
+For a public deployment, set `PHX_HOST` to its external hostname and terminate HTTPS at the reverse
+proxy. The OAuth resource URL is then `https://<PHX_HOST>/mcp`. Add it to Codex and complete the
+browser consent flow:
+
+```bash
+codex mcp add whisperlogs --url https://logs.example.com/mcp
+codex mcp login whisperlogs
+```
+
+Codex can use Client ID Metadata Documents when supplied and otherwise falls back to stateless
+Dynamic Client Registration. See the [official OpenAI MCP documentation](https://developers.openai.com/codex/mcp/)
+for current Codex client configuration.
+
 ## Sending Logs
 
 WhisperLogs supports three ways to ingest logs:
@@ -276,6 +297,9 @@ that already has application rows.
 | `WHISPERLOGS_BIND_IP` | `127.0.0.1` | IP literal to bind; containers normally set `0.0.0.0` and publish a loopback host port |
 | `PORT` | `4050` | Web server port |
 | `POOL_SIZE` | `10` | Database connection pool size |
+| `WHISPERLOGS_MCP_QUERY_TIMEOUT_MS` | `5000` | Maximum database time for one MCP log search |
+| `WHISPERLOGS_MCP_MAX_RESPONSE_BYTES` | `1048576` | Maximum MCP tool-result size, including the compatibility text copy |
+| `WHISPERLOGS_MCP_MAX_QUERY_BYTES` | `4096` | Maximum UTF-8 byte length of an MCP search query |
 
 See [the security and operations reference](docs/security-and-operations.md) for all validated
 limits, time semantics, ownership rules, export/S3 behavior, and shipper retry policy. See

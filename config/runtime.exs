@@ -186,6 +186,12 @@ if config_env() == :prod do
     cycle_timeout_ms: parse_positive_integer.("WHISPERLOGS_ALERT_CYCLE_TIMEOUT_MS", 20_000)
   }
 
+  config :whisperlogs, :mcp_limits, %{
+    query_timeout_ms: parse_positive_integer.("WHISPERLOGS_MCP_QUERY_TIMEOUT_MS", 5_000),
+    max_response_bytes: parse_positive_integer.("WHISPERLOGS_MCP_MAX_RESPONSE_BYTES", 1_048_576),
+    max_query_bytes: parse_positive_integer.("WHISPERLOGS_MCP_MAX_QUERY_BYTES", 4_096)
+  }
+
   config :whisperlogs, :syslog_limits, %{
     max_connections: parse_positive_integer.("WHISPERLOGS_SYSLOG_MAX_CONNECTIONS", 128),
     max_connections_per_source:

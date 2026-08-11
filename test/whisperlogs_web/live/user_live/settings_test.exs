@@ -7,6 +7,7 @@ defmodule WhisperLogsWeb.UserLive.SettingsTest do
   alias WhisperLogs.Accounts
   import Phoenix.LiveViewTest
   import WhisperLogs.AccountsFixtures
+  import WhisperLogs.OAuthFixtures
 
   describe "Settings page" do
     test "renders settings page", %{conn: conn} do
@@ -17,6 +18,7 @@ defmodule WhisperLogsWeb.UserLive.SettingsTest do
 
       assert html =~ "Change Email"
       assert html =~ "Save Password"
+      assert html =~ ~s(id="connected-apps-section")
     end
 
     test "redirects if user is not logged in", %{conn: conn} do
@@ -37,6 +39,36 @@ defmodule WhisperLogsWeb.UserLive.SettingsTest do
         |> follow_redirect(conn, ~p"/users/log-in")
 
       assert conn.resp_body =~ "You must re-authenticate to access this page."
+    end
+  end
+
+  describe "connected apps" do
+    setup %{conn: conn} do
+      user = user_fixture()
+      %{credentials: credentials} = oauth_credentials_fixture(user)
+      scope = WhisperLogs.Accounts.Scope.for_user(user)
+      %{conn: log_in_user(conn, user), user: user, scope: scope, credentials: credentials}
+    end
+
+    test "lists and revokes an OAuth grant", %{
+      conn: conn,
+      scope: scope,
+      credentials: credentials
+    } do
+      {:ok, view, _html} = live(conn, ~p"/users/settings")
+      [grant] = WhisperLogs.OAuth.list_grants(scope)
+
+      assert has_element?(view, "#connected-apps")
+      assert has_element?(view, "#revoke-oauth-grant-#{grant.id}")
+
+      view
+      |> element("#revoke-oauth-grant-#{grant.id}")
+      |> render_click()
+
+      refute has_element?(view, "#revoke-oauth-grant-#{grant.id}")
+
+      assert {:error, :invalid_token} =
+               WhisperLogs.OAuth.authenticate_access_token(credentials["access_token"])
     end
   end
 

@@ -26,6 +26,24 @@ defmodule WhisperLogsWeb.Router do
     post "/logs", LogController, :ingest
   end
 
+  # OAuth discovery, public-client registration, token exchange, and the MCP resource
+  # are API-style routes: clients cannot have a browser session during discovery or token use.
+  scope "/", WhisperLogsWeb do
+    pipe_through :api
+
+    get "/.well-known/oauth-protected-resource", OAuthMetadataController, :protected_resource
+    get "/.well-known/oauth-protected-resource/mcp", OAuthMetadataController, :protected_resource
+    get "/.well-known/oauth-authorization-server", OAuthMetadataController, :authorization_server
+    post "/oauth/register", OAuthRegistrationController, :create
+    post "/oauth/token", OAuthTokenController, :create
+
+    post "/mcp", McpController, :handle
+    get "/mcp", McpController, :method_not_allowed
+    put "/mcp", McpController, :method_not_allowed
+    patch "/mcp", McpController, :method_not_allowed
+    delete "/mcp", McpController, :method_not_allowed
+  end
+
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:whisperlogs, :dev_routes) do
     # If you want to use the LiveDashboard in production, you should put
@@ -47,6 +65,11 @@ defmodule WhisperLogsWeb.Router do
 
   scope "/", WhisperLogsWeb do
     pipe_through [:browser, :require_authenticated_user]
+
+    # Consent is a controller route in the authenticated browser pipeline because it
+    # requires the existing session and current_scope assigns.
+    get "/oauth/authorize", OAuthAuthorizationController, :new
+    post "/oauth/authorize", OAuthAuthorizationController, :create
 
     live_session :require_authenticated_user,
       on_mount: [{WhisperLogsWeb.UserAuth, :require_authenticated}] do

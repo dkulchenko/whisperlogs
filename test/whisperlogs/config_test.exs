@@ -3,7 +3,7 @@ defmodule WhisperLogs.ConfigTest do
 
   alias WhisperLogs.Config
 
-  @keys ~w(receiver_limits export_limits alert_limits syslog_limits s3_allowed_hosts export_root dns_cluster_query)a
+  @keys ~w(receiver_limits export_limits alert_limits mcp_limits syslog_limits s3_allowed_hosts export_root dns_cluster_query)a
 
   setup do
     original = Map.new(@keys, &{&1, Application.get_env(:whisperlogs, &1)})
@@ -60,6 +60,15 @@ defmodule WhisperLogs.ConfigTest do
     )
 
     assert_raise ArgumentError, ~r/query timeout plus 1000ms cleanup/, &Config.validate!/0
+  end
+
+  test "requires MCP responses to fit one complete event and compatibility copy" do
+    limits = Config.mcp_limits() |> Map.put(:max_response_bytes, 65_536)
+    Application.put_env(:whisperlogs, :mcp_limits, limits)
+
+    assert_raise ArgumentError,
+                 ~r/MCP response limit must fit one complete log/,
+                 &Config.validate!/0
   end
 
   test "rejects clustering configuration" do

@@ -7,6 +7,7 @@ defmodule WhisperLogs.Retention do
   - Export jobs older than 90 days
   - Alert history older than 90 days
   - Expired user tokens (session: 14 days, magic link: 15 min, email change: 7 days)
+  - Expired OAuth credentials and grants revoked for more than 90 days
   """
   use GenServer
 
@@ -16,6 +17,7 @@ defmodule WhisperLogs.Retention do
   alias WhisperLogs.Alerts
   alias WhisperLogs.Exports
   alias WhisperLogs.Accounts
+  alias WhisperLogs.OAuth
 
   @default_retention_days 30
   @history_retention_days 90
@@ -74,6 +76,11 @@ defmodule WhisperLogs.Retention do
     case Accounts.delete_expired_tokens() do
       {0, _} -> :ok
       {count, _} -> Logger.info("Retention cleanup: deleted #{count} expired user tokens")
+    end
+
+    case OAuth.delete_expired_credentials() do
+      {0, _} -> :ok
+      {count, _} -> Logger.info("Retention cleanup: deleted #{count} expired OAuth records")
     end
   rescue
     error ->

@@ -12,6 +12,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
   alias WhisperLogs.Alerts.{Alert, AlertHistory, NotificationChannel}
   alias WhisperLogs.Exports.{ExportDestination, ExportJob}
   alias WhisperLogs.Logs.{Log, SavedSearch}
+  alias WhisperLogs.OAuth.{AuthorizationCode, Grant, Token}
   alias WhisperLogs.Repo.{Postgres, SQLite}
 
   @default_batch_size 1_000
@@ -44,6 +45,63 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
         :inserted_at
       ],
       utc_datetime: [:authenticated_at, :inserted_at]
+    },
+    %{
+      table: "oauth_grants",
+      schema: Grant,
+      columns: [
+        :id,
+        :user_id,
+        :client_id,
+        :client_key_hash,
+        :client_name,
+        :redirect_uri,
+        :scope,
+        :resource,
+        :revoked_at,
+        :inserted_at,
+        :updated_at
+      ],
+      utc_datetime_usec: [:revoked_at, :inserted_at, :updated_at]
+    },
+    %{
+      table: "oauth_authorization_codes",
+      schema: AuthorizationCode,
+      columns: [
+        :id,
+        :grant_id,
+        :token_hash,
+        :redirect_uri,
+        :code_challenge,
+        :expires_at,
+        :used_at,
+        :inserted_at
+      ],
+      utc_datetime_usec: [:expires_at, :used_at, :inserted_at]
+    },
+    %{
+      table: "oauth_tokens",
+      schema: Token,
+      columns: [
+        :id,
+        :grant_id,
+        :access_token_hash,
+        :refresh_token_hash,
+        :access_expires_at,
+        :refresh_expires_at,
+        :refresh_used_at,
+        :revoked_at,
+        :inserted_at,
+        :updated_at
+      ],
+      utc_datetime_usec: [
+        :access_expires_at,
+        :refresh_expires_at,
+        :refresh_used_at,
+        :revoked_at,
+        :inserted_at,
+        :updated_at
+      ]
     },
     %{
       table: "sources",
@@ -215,6 +273,9 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
   @sequence_tables ~w(
     users
     users_tokens
+    oauth_grants
+    oauth_authorization_codes
+    oauth_tokens
     logs
     notification_channels
     alerts
