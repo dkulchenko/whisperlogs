@@ -239,6 +239,8 @@ defmodule WhisperLogs.Logs do
     limits = WhisperLogs.Config.mcp_limits()
     limit = Keyword.get(opts, :limit, 50)
     before = Keyword.get(opts, :before)
+    since = Keyword.get(opts, :since)
+    until = Keyword.get(opts, :until)
     trimmed = String.trim(search)
 
     cond do
@@ -247,6 +249,9 @@ defmodule WhisperLogs.Logs do
 
       not is_integer(limit) or limit < 1 or limit > 100 ->
         {:error, :invalid_limit}
+
+      not valid_timestamp_bounds?(since, until) ->
+        {:error, :invalid_time_range}
 
       true ->
         case SearchParser.parse(search) do
@@ -257,6 +262,7 @@ defmodule WhisperLogs.Logs do
             query =
               Log
               |> maybe_before(before)
+              |> filter_event_time_range(since, until)
               |> order_by([l], desc: l.inserted_at, desc: l.id)
               |> apply_search_tokens(tokens)
               |> limit(^(limit + 1))
@@ -277,6 +283,28 @@ defmodule WhisperLogs.Logs do
       [l],
       l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id)
     )
+  end
+
+  defp valid_timestamp_bounds?(nil, nil), do: true
+  defp valid_timestamp_bounds?(%DateTime{}, nil), do: true
+  defp valid_timestamp_bounds?(nil, %DateTime{}), do: true
+
+  defp valid_timestamp_bounds?(%DateTime{} = since, %DateTime{} = until) do
+    DateTime.compare(since, until) == :lt
+  end
+
+  defp valid_timestamp_bounds?(_since, _until), do: false
+
+  defp filter_event_time_range(query, nil, nil), do: query
+
+  defp filter_event_time_range(query, %DateTime{} = since, nil),
+    do: where(query, [l], l.timestamp >= ^since)
+
+  defp filter_event_time_range(query, nil, %DateTime{} = until),
+    do: where(query, [l], l.timestamp < ^until)
+
+  defp filter_event_time_range(query, %DateTime{} = since, %DateTime{} = until) do
+    where(query, [l], l.timestamp >= ^since and l.timestamp < ^until)
   end
 
   @doc """

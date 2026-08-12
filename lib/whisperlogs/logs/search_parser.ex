@@ -93,16 +93,16 @@ defmodule WhisperLogs.Logs.SearchParser do
       -/(?:[^/\\]|\\.)+/        |  # -/excluded regex/
       "[^"]*"                   |  # "quoted phrase"
       /(?:[^/\\]|\\.)+/         |  # /regex/
-      -[\w.-]+:>=[\w.-]+        |  # -key:>=value
-      -[\w.-]+:<=[\w.-]+        |  # -key:<=value
-      -[\w.-]+:>[\w.-]+         |  # -key:>value
-      -[\w.-]+:<[\w.-]+         |  # -key:<value
-      [\w.-]+:>=[\w.-]+         |  # key:>=value
-      [\w.-]+:<=[\w.-]+         |  # key:<=value
-      [\w.-]+:>[\w.-]+          |  # key:>value
-      [\w.-]+:<[\w.-]+          |  # key:<value
-      -[\w.-]+:[\w.-]+          |  # -key:value
-      [\w.-]+:[\w.-]+           |  # key:value
+      -[\w.-]+:>=\S+             |  # -key:>=value
+      -[\w.-]+:<=\S+             |  # -key:<=value
+      -[\w.-]+:>\S+              |  # -key:>value
+      -[\w.-]+:<\S+              |  # -key:<value
+      [\w.-]+:>=\S+              |  # key:>=value
+      [\w.-]+:<=\S+              |  # key:<=value
+      [\w.-]+:>\S+               |  # key:>value
+      [\w.-]+:<\S+               |  # key:<value
+      -[\w.-]+:\S+               |  # -key:value
+      [\w.-]+:\S+                |  # key:value
       -[\w.-]+                  |  # -term
       [\w.-]+                      # plain term
     }xu
@@ -151,19 +151,19 @@ defmodule WhisperLogs.Logs.SearchParser do
         validate_regex(pattern, :regex)
 
       # Negative metadata filter with operator: -key:>=value, -key:>value, etc.
-      Regex.match?(~r/^-[\w.-]+:(?:>=|<=|>|<)[\w.-]+$/, token) ->
+      Regex.match?(~r/^-[\w.-]+:(?:>=|<=|>|<)\S+$/, token) ->
         parse_metadata_token(String.slice(token, 1..-1//1), :exclude_metadata)
 
       # Metadata filter with operator: key:>=value, key:>value, etc.
-      Regex.match?(~r/^[\w.-]+:(?:>=|<=|>|<)[\w.-]+$/, token) ->
+      Regex.match?(~r/^[\w.-]+:(?:>=|<=|>|<)\S+$/, token) ->
         parse_metadata_token(token, :metadata)
 
       # Negative metadata filter: -key:value
-      Regex.match?(~r/^-[\w.-]+:[\w.-]+$/, token) ->
+      Regex.match?(~r/^-[\w.-]+:\S+$/, token) ->
         parse_metadata_token(String.slice(token, 1..-1//1), :exclude_metadata)
 
       # Metadata filter: key:value
-      Regex.match?(~r/^[\w.-]+:[\w.-]+$/, token) ->
+      Regex.match?(~r/^[\w.-]+:\S+$/, token) ->
         parse_metadata_token(token, :metadata)
 
       # Negative term: -word
@@ -196,13 +196,16 @@ defmodule WhisperLogs.Logs.SearchParser do
 
           true ->
             # Regular metadata token
-            {type, key, operator, unquote_value(value)}
+            {type, metadata_key(key), operator, unquote_value(value)}
         end
 
       _ ->
         nil
     end
   end
+
+  defp metadata_key("metadata." <> key) when key != "", do: key
+  defp metadata_key(key), do: key
 
   # Parse level filter with alias normalization
   defp parse_level_filter(value, type) do

@@ -87,6 +87,12 @@ codex mcp add whisperlogs --url https://logs.example.com/mcp
 codex mcp login whisperlogs
 ```
 
+`search_logs` accepts optional RFC 3339 `since` (inclusive) and `until` (exclusive) fields; prefer
+these structured fields for time windows. Its optional `query` field supports terms and ANDed
+filters such as `level:error stripe`, `request_path:"/checkout"`, and
+`timestamp:>=2026-08-12T00:15:00Z`. Metadata keys can also use the explicit
+`metadata.request_path:/checkout` form.
+
 Codex can use Client ID Metadata Documents when supplied and otherwise falls back to stateless
 Dynamic Client Registration. See the [official OpenAI MCP documentation](https://developers.openai.com/codex/mcp/)
 for current Codex client configuration.

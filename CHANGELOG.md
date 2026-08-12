@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.6.1 - 2026-08-11
+
+- Fix timestamp comparisons containing complete RFC 3339 times, including `Z`
+  and numeric timezone offsets. Colons in the time value no longer split into
+  unintended ANDed search terms.
+- Add optional structured `since` and `until` fields to the MCP `search_logs`
+  tool. Bounds apply to producer timestamps, with an inclusive lower bound and
+  exclusive upper bound, and are cryptographically bound to pagination cursors.
+- Accept slash-containing unquoted metadata values and the intuitive
+  `metadata.<key>` prefix while retaining the existing direct `<key>:<value>`
+  syntax.
+- Expand model-facing tool instructions with concrete timestamp, metadata,
+  level, and path-search examples; make the free-form query optional when
+  structured time bounds are sufficient.
+
 ## v0.6.0 - 2026-08-11
 
 ### OAuth MCP log search

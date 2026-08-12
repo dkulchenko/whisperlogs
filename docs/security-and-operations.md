@@ -28,6 +28,11 @@ the exact `/mcp` resource indicator, matching protocol/body mirror headers, and 
 when that header is present. Discovery and token endpoints use the unauthenticated JSON pipeline;
 consent uses the authenticated browser pipeline and its CSRF protection.
 
+For MCP searches, prefer the structured RFC 3339 `since` and `until` arguments for time windows.
+They apply to the producer-supplied event timestamp (`since` inclusive, `until` exclusive) and are
+bound to the opaque pagination cursor along with the query and user. The equivalent advanced query
+syntax remains available, for example `timestamp:>=2026-08-12T00:15:00Z level:error`.
+
 Authorization codes expire after five minutes and require PKCE S256. Access tokens expire after
 one hour. Refresh tokens rotate and expire after 30 days; replay of a consumed refresh token
 revokes the complete grant. Only SHA-256 credential hashes are stored. Reauthorization,

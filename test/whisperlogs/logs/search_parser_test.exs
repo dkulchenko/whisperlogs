@@ -61,6 +61,20 @@ defmodule WhisperLogs.Logs.SearchParserTest do
       assert dt.year == 2025
     end
 
+    test "parses a complete RFC 3339 timestamp without creating leftover terms" do
+      assert {:ok, [{:timestamp_filter, :gte, dt}, {:term, "checkout"}]} =
+               SearchParser.parse("timestamp:>=2026-08-12T00:15:00Z checkout")
+
+      assert dt == ~U[2026-08-12 00:15:00Z]
+    end
+
+    test "parses RFC 3339 timestamps with numeric offsets" do
+      assert {:ok, [{:timestamp_filter, :lt, dt}]} =
+               SearchParser.parse("timestamp:<2026-08-12T02:15:00+02:00")
+
+      assert dt == ~U[2026-08-12 00:15:00Z]
+    end
+
     test "parses timestamp with lt operator" do
       {:ok, [{:timestamp_filter, :lt, dt}]} = SearchParser.parse("timestamp:<2025-01-01")
       assert dt.year == 2025
@@ -161,6 +175,16 @@ defmodule WhisperLogs.Logs.SearchParserTest do
     test "key is case insensitive" do
       assert {:ok, [{:source_filter, "prod"}]} = SearchParser.parse("SOURCE:prod")
       assert {:ok, [{:source_filter, "prod"}]} = SearchParser.parse("Source:prod")
+    end
+  end
+
+  describe "metadata filters" do
+    test "accepts slash values and an optional metadata prefix" do
+      assert {:ok, [{:metadata, "request_path", :eq, "/checkout"}]} =
+               SearchParser.parse("metadata.request_path:/checkout")
+
+      assert {:ok, [{:metadata, "request_path", :eq, "/checkout"}]} =
+               SearchParser.parse(~s(request_path:"/checkout"))
     end
   end
 

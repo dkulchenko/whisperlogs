@@ -26,7 +26,7 @@ defmodule WhisperLogs.MCP do
         }
       },
       "instructions" =>
-        "Search the authenticated user's WhisperLogs workspace with search_logs. Use an empty query for newest logs; otherwise use the WhisperLogs grammar (terms, phrases, exclusions, regex, metadata comparisons, level:, source:, and timestamp:). Results are newest first; pass next_cursor unchanged to continue.",
+        "Search the authenticated user's WhisperLogs workspace with search_logs. Prefer the structured since and until fields for time windows. Use query for terms and filters such as level:error, request_path:\"/checkout\", or timestamp:>=2026-08-12T00:15:00Z. Metadata keys may optionally use a metadata. prefix. Results are newest first; pass next_cursor unchanged to continue.",
       "ttlMs" => 300_000,
       "cacheScope" => "private"
     }
@@ -42,12 +42,22 @@ defmodule WhisperLogs.MCP do
   end
 
   def call(%Scope{} = scope, @tool_name, arguments) when is_map(arguments) do
-    with {:ok, query} <- required_string(arguments, "query"),
+    with {:ok, query} <- optional_query(arguments),
          {:ok, limit} <- optional_limit(arguments),
+         {:ok, since} <- optional_datetime(arguments, "since"),
+         {:ok, until} <- optional_datetime(arguments, "until"),
+         :ok <- validate_time_range(since, until),
          :ok <- reject_unknown_arguments(arguments),
-         {:ok, before} <- decode_cursor(Map.get(arguments, "cursor"), scope, query),
-         {:ok, page} <- Logs.search_logs(scope, query, limit: limit, before: before) do
-      {:ok, search_result(scope, query, page)}
+         identity = search_identity(query, since, until),
+         {:ok, before} <- decode_cursor(Map.get(arguments, "cursor"), scope, identity),
+         {:ok, page} <-
+           Logs.search_logs(scope, query,
+             limit: limit,
+             before: before,
+             since: since,
+             until: until
+           ) do
+      {:ok, search_result(scope, identity, page)}
     else
       {:error, reason} -> {:ok, tool_error(reason)}
     end
@@ -63,7 +73,7 @@ defmodule WhisperLogs.MCP do
       "name" => @tool_name,
       "title" => "Search WhisperLogs",
       "description" =>
-        "Search logs using WhisperLogs query syntax and return a newest-first page. Plain terms search messages and metadata. Supports quoted phrases, -exclusions, /regex/, metadata key:value and numeric comparisons, plus level:, source:, and timestamp:. An empty query returns the newest logs.",
+        "Search logs and return a newest-first page. Prefer since/until for RFC 3339 time windows. Query examples: `checkout`, `level:error stripe`, `request_path:\"/checkout\"`, `duration_ms:>100`, and `timestamp:>=2026-08-12T00:15:00Z`. Plain terms search messages and metadata; filters are ANDed. Metadata keys can be written as `request_path` or `metadata.request_path`. An empty or omitted query returns the newest logs.",
       "inputSchema" => %{
         "$schema" => "https://json-schema.org/draft/2020-12/schema",
         "type" => "object",
@@ -71,7 +81,20 @@ defmodule WhisperLogs.MCP do
           "query" => %{
             "type" => "string",
             "maxLength" => 4_096,
-            "description" => "WhisperLogs search query. Use an empty string for newest logs."
+            "default" => "",
+            "description" =>
+              "Optional WhisperLogs query. Filters are ANDed. Use `level:error`, `request_path:\"/checkout\"`, or `timestamp:>=2026-08-12T00:15:00Z`; use an empty string for all logs."
+          },
+          "since" => %{
+            "type" => "string",
+            "format" => "date-time",
+            "description" =>
+              "Inclusive lower bound on the log's producer timestamp, as RFC 3339 (for example 2026-08-12T00:15:00Z). Prefer this over embedding a lower time bound in query."
+          },
+          "until" => %{
+            "type" => "string",
+            "format" => "date-time",
+            "description" => "Exclusive upper bound on the log's producer timestamp, as RFC 3339."
           },
           "limit" => %{
             "type" => "integer",
@@ -84,7 +107,6 @@ defmodule WhisperLogs.MCP do
             "description" => "Opaque next_cursor from the previous response."
           }
         },
-        "required" => ["query"],
         "additionalProperties" => false
       },
       "outputSchema" => output_schema(),
@@ -127,7 +149,7 @@ defmodule WhisperLogs.MCP do
     }
   end
 
-  defp search_result(scope, query, %{logs: logs, has_more: database_has_more}) do
+  defp search_result(scope, identity, %{logs: logs, has_more: database_has_more}) do
     max_bytes = WhisperLogs.Config.mcp_limits().max_response_bytes
 
     {included, size_truncated?} = fit_logs(logs, max_bytes)
@@ -135,7 +157,7 @@ defmodule WhisperLogs.MCP do
 
     next_cursor =
       case {has_more, List.last(included)} do
-        {true, log} when not is_nil(log) -> encode_cursor(scope, query, log)
+        {true, log} when not is_nil(log) -> encode_cursor(scope, identity, log)
         _ -> nil
       end
 
@@ -190,13 +212,13 @@ defmodule WhisperLogs.MCP do
     }
   end
 
-  defp encode_cursor(%Scope{user: user}, query, log) do
+  defp encode_cursor(%Scope{user: user}, identity, log) do
     Phoenix.Token.encrypt(
       WhisperLogsWeb.Endpoint,
       @cursor_salt,
       %{
         "user_id" => user.id,
-        "query" => query,
+        "search" => identity,
         "observed_at" => DateTime.to_iso8601(log.inserted_at),
         "id" => log.id
       },
@@ -207,14 +229,14 @@ defmodule WhisperLogs.MCP do
   defp decode_cursor(nil, _scope, _query), do: {:ok, nil}
   defp decode_cursor("", _scope, _query), do: {:error, :invalid_cursor}
 
-  defp decode_cursor(cursor, %Scope{user: user}, query) when is_binary(cursor) do
+  defp decode_cursor(cursor, %Scope{user: user}, identity) when is_binary(cursor) do
     with {:ok, payload} <-
            Phoenix.Token.decrypt(WhisperLogsWeb.Endpoint, @cursor_salt, cursor,
              max_age: @cursor_lifetime_seconds
            ),
          %{
            "user_id" => user_id,
-           "query" => ^query,
+           "search" => ^identity,
            "observed_at" => observed_at,
            "id" => id
          } <- payload,
@@ -228,12 +250,47 @@ defmodule WhisperLogs.MCP do
 
   defp decode_cursor(_cursor, _scope, _query), do: {:error, :invalid_cursor}
 
-  defp required_string(arguments, key) do
-    case Map.fetch(arguments, key) do
-      {:ok, value} when is_binary(value) -> {:ok, value}
+  defp optional_query(arguments) do
+    case Map.get(arguments, "query", "") do
+      value when is_binary(value) -> {:ok, value}
       _ -> {:error, :invalid_arguments}
     end
   end
+
+  defp optional_datetime(arguments, key) do
+    case Map.get(arguments, key) do
+      nil ->
+        {:ok, nil}
+
+      value when is_binary(value) ->
+        case DateTime.from_iso8601(value) do
+          {:ok, datetime, _offset} -> {:ok, DateTime.truncate(datetime, :microsecond)}
+          _ -> {:error, :invalid_datetime}
+        end
+
+      _ ->
+        {:error, :invalid_datetime}
+    end
+  end
+
+  defp validate_time_range(nil, nil), do: :ok
+  defp validate_time_range(%DateTime{}, nil), do: :ok
+  defp validate_time_range(nil, %DateTime{}), do: :ok
+
+  defp validate_time_range(%DateTime{} = since, %DateTime{} = until) do
+    if DateTime.compare(since, until) == :lt, do: :ok, else: {:error, :invalid_time_range}
+  end
+
+  defp search_identity(query, since, until) do
+    %{
+      "query" => query,
+      "since" => encode_datetime(since),
+      "until" => encode_datetime(until)
+    }
+  end
+
+  defp encode_datetime(nil), do: nil
+  defp encode_datetime(%DateTime{} = datetime), do: DateTime.to_iso8601(datetime)
 
   defp optional_limit(arguments) do
     case Map.get(arguments, "limit", 50) do
@@ -243,7 +300,7 @@ defmodule WhisperLogs.MCP do
   end
 
   defp reject_unknown_arguments(arguments) do
-    if Enum.all?(Map.keys(arguments), &(&1 in ~w(query limit cursor))),
+    if Enum.all?(Map.keys(arguments), &(&1 in ~w(query since until limit cursor))),
       do: :ok,
       else: {:error, :invalid_arguments}
   end
@@ -256,6 +313,8 @@ defmodule WhisperLogs.MCP do
         :invalid_limit -> "limit must be an integer from 1 through 100."
         :invalid_cursor -> "The cursor is invalid, expired, or belongs to another search."
         :query_timeout -> "The log search timed out. Narrow the query and try again."
+        :invalid_datetime -> "since and until must be RFC 3339 timestamps."
+        :invalid_time_range -> "since must be earlier than until."
         _ -> "Invalid search_logs arguments."
       end
 
