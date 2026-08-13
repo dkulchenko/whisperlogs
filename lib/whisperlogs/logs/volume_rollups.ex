@@ -53,6 +53,19 @@ defmodule WhisperLogs.Logs.VolumeRollups do
     {to_integer(count), to_integer(bytes)}
   end
 
+  def estimated_count(from, to) do
+    query =
+      LogVolumeRollup
+      |> where([r], r.granularity == "hour")
+      |> maybe_starting_at(from)
+      |> maybe_ending_at(to)
+
+    query
+    |> select([r], coalesce(sum(r.log_count), 0))
+    |> Repo.one()
+    |> to_integer()
+  end
+
   def reconcile_after_delete!(%DateTime{} = cutoff) do
     Enum.each([:hour, :day], fn granularity ->
       start = bucket_start(cutoff, granularity)
@@ -116,6 +129,20 @@ defmodule WhisperLogs.Logs.VolumeRollups do
     |> order_by([r], asc: r.bucket_start)
     |> select([r], {r.bucket_start, r.log_count, r.byte_count})
     |> Repo.all()
+  end
+
+  defp maybe_starting_at(query, nil), do: query
+
+  defp maybe_starting_at(query, %DateTime{} = datetime) do
+    start = bucket_start(datetime, :hour)
+    where(query, [r], r.bucket_start >= ^start)
+  end
+
+  defp maybe_ending_at(query, nil), do: query
+
+  defp maybe_ending_at(query, %DateTime{} = datetime) do
+    finish = bucket_start(datetime, :hour)
+    where(query, [r], r.bucket_start <= ^finish)
   end
 
   defp bytes_for_query(query) do

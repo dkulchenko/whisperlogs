@@ -9,6 +9,7 @@ defmodule WhisperLogs.Logs do
   alias WhisperLogs.Repo
   alias WhisperLogs.Accounts.{Scope, User}
   alias WhisperLogs.Logs.Log
+  alias WhisperLogs.Logs.SqliteFts
   alias WhisperLogs.Logs.VolumeRollups
   alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
@@ -271,7 +272,7 @@ defmodule WhisperLogs.Logs do
               |> maybe_before(before)
               |> filter_observed_time_range(since, until)
               |> order_by([l], desc: l.inserted_at, desc: l.id)
-              |> apply_search_tokens(tokens)
+              |> apply_search_tokens_hybrid(tokens, since, until)
               |> limit(^(limit + 1))
 
             logs = Repo.all(query, timeout: limits.query_timeout_ms)
@@ -391,11 +392,14 @@ defmodule WhisperLogs.Logs do
   end
 
   defp apply_filters(query, opts) do
+    from = Keyword.get(opts, :from)
+    to = Keyword.get(opts, :to)
+
     query
-    |> filter_time_range(Keyword.get(opts, :from), Keyword.get(opts, :to))
+    |> filter_time_range(from, to)
     |> filter_levels(Keyword.get(opts, :levels))
     |> filter_sources(Keyword.get(opts, :sources))
-    |> filter_search(Keyword.get(opts, :search))
+    |> filter_search(Keyword.get(opts, :search), from, to)
     |> filter_request_id(Keyword.get(opts, :request_id))
   end
 
@@ -414,13 +418,13 @@ defmodule WhisperLogs.Logs do
   defp filter_sources(query, []), do: query
   defp filter_sources(query, sources), do: where(query, [l], l.source in ^sources)
 
-  defp filter_search(query, nil), do: query
-  defp filter_search(query, ""), do: query
+  defp filter_search(query, nil, _from, _to), do: query
+  defp filter_search(query, "", _from, _to), do: query
 
-  defp filter_search(query, search) do
+  defp filter_search(query, search, from, to) do
     case SearchParser.parse(search) do
       {:ok, []} -> query
-      {:ok, tokens} -> Enum.reduce(tokens, query, &apply_search_token/2)
+      {:ok, tokens} -> apply_search_tokens_hybrid(query, tokens, from, to)
     end
   end
 
@@ -430,6 +434,12 @@ defmodule WhisperLogs.Logs do
   """
   def apply_search_tokens(query, tokens) when is_list(tokens) do
     Enum.reduce(tokens, query, &apply_search_token/2)
+  end
+
+  defp apply_search_tokens_hybrid(query, tokens, from, to) do
+    query
+    |> SqliteFts.maybe_prefilter(tokens, from, to)
+    |> apply_search_tokens(tokens)
   end
 
   @doc """
@@ -452,7 +462,7 @@ defmodule WhisperLogs.Logs do
       {:ok, tokens} ->
         Log
         |> where([l], l.inserted_at >= ^cutoff)
-        |> apply_search_tokens(tokens)
+        |> apply_search_tokens_hybrid(tokens, cutoff, nil)
         |> Repo.aggregate(:count, :id)
     end
   end
@@ -471,7 +481,7 @@ defmodule WhisperLogs.Logs do
         {hour_count, day_count, week_count} =
           Log
           |> where([l], l.inserted_at >= ^week)
-          |> apply_search_tokens(tokens)
+          |> apply_search_tokens_hybrid(tokens, week, nil)
           |> select([l], {
             fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^hour),
             fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^day),

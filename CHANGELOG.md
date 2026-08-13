@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.7.0 - 2026-08-12
+
+### Fast SQLite search and metrics
+
+- Add a contentless FTS5 trigram candidate index for SQLite message and metadata
+  substring searches. Exact existing predicates recheck every candidate, so the
+  optimization preserves current search semantics.
+- Route broad, selective searches through FTS while retaining newest-first
+  observed-time scans for narrow windows, common terms, short terms, regexes,
+  and negative-only searches. A 3.4-million-row production copy improved rare
+  and absent all-time searches from roughly three seconds to single-digit
+  milliseconds without regressing common recent searches.
+- Persist hourly and daily log-count and byte-volume rollups, update them in the
+  ingestion transaction, reconcile them during retention, and use them for the
+  metrics page and hybrid search planning instead of rescanning the log corpus.
+- Omit the redundant level predicate when all canonical levels are selected.
+
+### Indexing and SQLite maintenance
+
+- Replace the old level/event-time and source-only indexes with observed-time
+  composites that support filtered newest-first browsing. PostgreSQL retains an
+  explicit event-time/ID index for producer-time ranges.
+- Compact SQLite's observed-time index from `(inserted_at, id)` to
+  `(inserted_at)`. SQLite's implicit rowid preserves stable `(inserted_at, id)`
+  ordering while reducing index storage.
+- Enable incremental auto-vacuum for new SQLite databases and run an adaptive
+  reclamation pass every 30 minutes. Each pass reclaims 5% of the freelist,
+  bounded to 64–2,048 pages, and safely retries busy databases later.
+- Rebuild persisted rollups after SQLite-to-PostgreSQL migration so copied
+  databases immediately expose accurate metrics.
+
+### Time semantics
+
+- Make structured MCP `since` and `until` bounds filter observed insertion time,
+  matching operational ordering, retention, dashboards, and pagination.
+- Keep `timestamp:` as the explicit producer event-time filter and document the
+  distinction in MCP model instructions and operations guidance.
+
+### Upgrade notes
+
+- Stop the application and take a restorable database backup before migrating.
+  The SQLite migrations backfill volume rollups and the FTS index while holding
+  the writer, so ingestion remains unavailable until migration completes.
+- Ensure several gigabytes of free disk space for the FTS index, migration WAL,
+  and temporary index replacement. The measured 3.4-million-row production copy
+  used approximately 653 MiB for the lean FTS index.
+- No manual FTS setup is required. Triggers maintain the index transactionally
+  for subsequent inserts, updates, retention deletes, and other log deletions.
+- Existing SQLite databases still require the separately documented one-time
+  `PRAGMA auto_vacuum=INCREMENTAL; VACUUM;` maintenance operation before
+  incremental reclamation can return pages to the filesystem.
+- Structured MCP clients relying on the v0.6.1 producer-time interpretation of
+  `since`/`until` must use explicit `timestamp:` filters instead.
+
 ## v0.6.1 - 2026-08-11
 
 - Fix timestamp comparisons containing complete RFC 3339 times, including `Z`

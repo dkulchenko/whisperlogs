@@ -56,6 +56,12 @@ defmodule WhisperLogs.Logs.VolumeRollupsTest do
       assert default_plan =~ "logs_observed_time_index"
       refute default_plan =~ "TEMP B-TREE"
 
+      explicit_columns =
+        Repo.query!("PRAGMA index_info(logs_observed_time_index)").rows
+        |> Enum.map(fn row -> Enum.at(row, 2) end)
+
+      assert explicit_columns == ["inserted_at"]
+
       level_plan =
         explain("""
         SELECT id FROM logs

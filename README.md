@@ -311,6 +311,19 @@ that already has application rows.
 | `WHISPERLOGS_MCP_MAX_RESPONSE_BYTES` | `1048576` | Maximum MCP tool-result size, including the compatibility text copy |
 | `WHISPERLOGS_MCP_MAX_QUERY_BYTES` | `4096` | Maximum UTF-8 byte length of an MCP search query |
 
+### SQLite text search index
+
+SQLite installations maintain a contentless FTS5 trigram index for message and metadata substring
+searches. WhisperLogs uses it only for selective searches over broad observed-time windows; narrow
+windows, common terms, terms shorter than three characters, regexes, and negative-only searches
+continue to use the ordered log indexes. FTS candidates are rechecked with the original predicates,
+so routing does not change search results.
+
+The migration that first creates this index backfills every stored log and blocks ingestion until
+it completes. Plan the first deployment as a maintenance window and keep at least several gigabytes
+of free disk space for the index, migration transaction, and WAL. Subsequent inserts, updates, and
+retention deletes maintain it automatically.
+
 ### SQLite incremental vacuum
 
 New SQLite databases use incremental auto-vacuum. Existing databases must be activated once during

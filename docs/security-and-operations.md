@@ -81,6 +81,12 @@ Non-identity request content encodings are rejected. There is intentionally no s
 per-source request budget or total application storage quota: operators must size, monitor, and
 retain the database for valid sustained traffic.
 
+SQLite plain-term and quoted-phrase searches may use a contentless FTS5 trigram candidate index.
+The original substring predicates always recheck candidates. Narrow observed-time windows and
+nonselective, short, regex, or negative-only searches retain the ordered scan path. FTS maintenance
+is transactional with log insertion and deletion; the initial backfill migration blocks ingestion
+and requires temporary disk capacity for the index and WAL.
+
 ## Alerts
 
 Each user may store 100 alerts and enable 20; at most 500 are enabled globally. Count-and-mutate
