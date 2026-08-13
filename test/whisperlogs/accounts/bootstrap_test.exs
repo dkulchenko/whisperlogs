@@ -28,10 +28,21 @@ defmodule WhisperLogs.Accounts.BootstrapTest do
         is_admin: true
       })
 
-    assert :ok = Bootstrap.run(password: @password)
+    assert :ok = Bootstrap.run(email: "admin@example.com", password: @password)
     assert %User{id: id} = updated = Repo.get!(User, legacy.id)
     assert id == legacy.id
+    assert updated.email == "admin@example.com"
     assert User.valid_password?(updated, @password)
+  end
+
+  test "requires a valid administrator email when bootstrapping" do
+    assert_raise RuntimeError, ~r/WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL is required/, fn ->
+      Bootstrap.run(email: nil, password: @password)
+    end
+
+    assert_raise RuntimeError, ~r/must be a valid email address/, fn ->
+      Bootstrap.run(email: "admin", password: @password)
+    end
   end
 
   test "leaves one password-bearing admin and non-admin users unchanged" do

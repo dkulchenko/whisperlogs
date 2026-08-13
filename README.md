@@ -12,7 +12,7 @@ A lightweight, self-hosted log aggregation and alerting system. Collect logs fro
 ```bash
 install -m 600 /dev/null ./whisperlogs_admin_password
 printf '%s' 'replace-with-a-long-password' > ./whisperlogs_admin_password
-export WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=local@localhost
+export WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 export WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE="$PWD/whisperlogs_admin_password"
 
 ./whisperlogs_linux      # Linux x86_64
@@ -26,7 +26,8 @@ whisperlogs_windows.exe  # Windows
 
 SQLite defaults to a loopback listener and persists its generated session secret beside the
 database. The bootstrap variables are required only while creating the first administrator (or
-upgrading the recognized legacy `local@localhost` account).
+upgrading the recognized legacy `local@localhost` account). During that legacy upgrade, the
+account is changed to the configured bootstrap administrator email.
 
 ## Features
 
@@ -226,7 +227,7 @@ docker run -d \
   -v whisperlogs_data:/var/lib/whisperlogs \
   -v "$PWD/whisperlogs_admin_password:/run/secrets/whisperlogs_admin_password:ro" \
   -e WHISPERLOGS_BIND_IP=0.0.0.0 \
-  -e WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=local@localhost \
+  -e WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL=admin@example.com \
   -e WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/whisperlogs_admin_password \
   whisperlogs:latest
 ```
@@ -273,12 +274,14 @@ public registration always creates non-admin users.
 Stop WhisperLogs before migrating so the SQLite database cannot change during the copy. The
 PostgreSQL target should be empty; the migration task runs migrations, copies all application
 tables, verifies row counts, and preserves the source administrator. A recognized passwordless
-legacy `local@localhost` administrator is upgraded using the same private password file contract.
+legacy `local@localhost` administrator is upgraded to `WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL` using
+the same private password file contract.
 
 ```bash
 export DATABASE_URL="postgres://user:password@localhost:5432/whisperlogs"
 export SQLITE_DATABASE_PATH="/var/lib/whisperlogs/db.sqlite"
 export SECRET_KEY_BASE="$(openssl rand -base64 48)"
+export WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL="admin@example.com"
 export WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE="$PWD/whisperlogs_admin_password"
 ./whisperlogs_linux eval "WhisperLogs.Release.migrate_sqlite_to_postgres()"
 ```
@@ -294,7 +297,7 @@ that already has application rows.
 | `DATABASE_URL` | - | PostgreSQL connection URL (enables PostgreSQL mode) |
 | `DATABASE_PATH` | `~/.local/share/whisperlogs/db.sqlite` | SQLite database path |
 | `SQLITE_DATABASE_PATH` | `DATABASE_PATH` | Source SQLite database path for SQLite-to-PostgreSQL migration |
-| `WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL` | - | Initial administrator email for an empty database |
+| `WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL` | - | Initial administrator email, also used to rename the recognized legacy administrator |
 | `WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE` | - | Absolute private regular file containing the initial/legacy administrator password |
 | `MIGRATION_BATCH_SIZE` | `1000` | Rows per batch during SQLite-to-PostgreSQL migration |
 | `MIGRATION_ALLOW_NON_EMPTY_TARGET` | `false` | Allow migration into a PostgreSQL target with existing application rows |

@@ -63,6 +63,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert {:ok, report} =
              SQLiteToPostgresMigrator.migrate(
                source_path: sqlite_path,
+               bootstrap_admin_email: "admin@example.com",
                bootstrap_admin_password_file: password_file!(),
                batch_size: 2,
                print_report?: false
@@ -71,7 +72,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert Enum.find(report, &(&1.table == "logs")).target_count == 2
 
     user = Postgres.one!(from u in User, where: u.id == 1)
-    assert user.email == "local@localhost"
+    assert user.email == "admin@example.com"
     assert user.is_admin
     assert User.valid_password?(user, @admin_password)
 
@@ -155,6 +156,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert {:ok, report} =
              SQLiteToPostgresMigrator.migrate(
                source_path: sqlite_path,
+               bootstrap_admin_email: "admin@example.com",
                bootstrap_admin_password_file: password_file!(),
                allow_non_empty_target?: true,
                print_report?: false

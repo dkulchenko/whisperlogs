@@ -13,7 +13,8 @@ The synchronous bootstrap child runs after the selected Repo and before the endp
 database requires `WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL` and an absolute
 `WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE`. The file must be a regular non-symlink, at most 1 KiB,
 and inaccessible to group/other users. The only automatic upgrade is a database containing the
-single passwordless `local@localhost` administrator. Ambiguous administrator states stop startup.
+single passwordless `local@localhost` administrator, which is renamed to the required bootstrap
+administrator email while its password is established. Ambiguous administrator states stop startup.
 
 Both SQLite and PostgreSQL require a real browser session. Users share the log corpus, while
 sources, alerts, notification channels, export destinations, and export jobs are owner-scoped.

@@ -46,7 +46,7 @@ defmodule WhisperLogs.Accounts.Bootstrap do
         insert_initial_admin(opts)
 
       {[%User{email: "local@localhost", is_admin: true, hashed_password: nil} = user], [user]} ->
-        set_legacy_password(user, opts)
+        upgrade_legacy_admin(user, opts)
 
       {_users, [%User{hashed_password: password}]} when is_binary(password) ->
         :ok
@@ -65,7 +65,7 @@ defmodule WhisperLogs.Accounts.Bootstrap do
   end
 
   defp insert_initial_admin(opts) do
-    email = Keyword.get(opts, :email) || System.get_env("WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL")
+    email = admin_email!(opts)
     password = read_password!(opts)
 
     %User{}
@@ -79,16 +79,41 @@ defmodule WhisperLogs.Accounts.Bootstrap do
     |> unwrap_or_rollback()
   end
 
-  defp set_legacy_password(user, opts) do
+  defp upgrade_legacy_admin(user, opts) do
+    email = admin_email!(opts)
     password = read_password!(opts)
 
     user
+    |> User.email_changeset(%{"email" => email}, validate_unique: false)
     |> User.password_changeset(%{
       "password" => password,
       "password_confirmation" => password
     })
     |> Repo.update()
     |> unwrap_or_rollback()
+  end
+
+  def admin_email!(opts \\ []) do
+    email =
+      case Keyword.fetch(opts, :email) do
+        {:ok, email} when is_binary(email) ->
+          email
+
+        {:ok, _email} ->
+          raise "WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL is required for bootstrap"
+
+        :error ->
+          System.get_env("WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL") ||
+            raise "WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL is required for bootstrap"
+      end
+
+    changeset = User.email_changeset(%User{}, %{"email" => email}, validate_unique: false)
+
+    if changeset.valid? do
+      Ecto.Changeset.get_change(changeset, :email)
+    else
+      raise "WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL must be a valid email address"
+    end
   end
 
   defp unwrap_or_rollback({:ok, _user}), do: :ok

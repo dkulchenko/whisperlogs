@@ -43,8 +43,9 @@ SELECT context, COUNT(*) FROM users_tokens GROUP BY context ORDER BY context;
 ```
 
 The accepted pre-migration states are one password-bearing administrator plus any number of
-non-admin users, or the single passwordless legacy `local@localhost` administrator. Existing
-`session` tokens will be revoked once by migration.
+non-admin users, or the single passwordless legacy `local@localhost` administrator. The legacy
+administrator is renamed to the configured bootstrap email while its password is established.
+Existing `session` tokens will be revoked once by migration.
 
 Null, dangling, and cross-owner records:
 
@@ -138,8 +139,9 @@ after seven days.
 
 ## 3. Configure secrets and runtime
 
-- Mount a read-only `0600` bootstrap password file and set the bootstrap email. The recognized
-  Calmbox legacy email is `local@localhost`.
+- Mount a read-only `0600` bootstrap password file and set the bootstrap email to the desired
+  administrator login. The recognized Calmbox legacy email is `local@localhost`; it is replaced
+  with the configured bootstrap email during upgrade.
 - Set `WHISPERLOGS_BIND_IP=0.0.0.0` inside a container while publishing only a loopback host port,
   unless a deliberate reverse proxy/network boundary exists.
 - Set `WHISPERLOGS_EXPORT_ROOT` to persistent storage (for example

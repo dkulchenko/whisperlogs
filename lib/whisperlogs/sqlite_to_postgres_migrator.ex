@@ -8,7 +8,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
   """
 
   alias Ecto.Adapters.SQL
-  alias WhisperLogs.Accounts.{Source, User, UserToken}
+  alias WhisperLogs.Accounts.{Bootstrap, Source, User, UserToken}
   alias WhisperLogs.Alerts.{Alert, AlertHistory, NotificationChannel}
   alias WhisperLogs.Exports.{ExportDestination, ExportJob}
   alias WhisperLogs.Logs.{Log, SavedSearch}
@@ -492,15 +492,23 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
 
     case {rows, admins} do
       {[[id, "local@localhost", nil, _]], [[id, "local@localhost", nil, _]]} ->
+        email_opts =
+          case Keyword.fetch(opts, :bootstrap_admin_email) do
+            {:ok, email} -> [email: email]
+            :error -> []
+          end
+
+        email = Bootstrap.admin_email!(email_opts)
+
         path =
           Keyword.get(opts, :bootstrap_admin_password_file) ||
             System.get_env("WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE")
 
-        password = WhisperLogs.Accounts.Bootstrap.read_password_file!(path)
-        %{admin_user_id: id, admin_password_hash: password_hash!(password)}
+        password = Bootstrap.read_password_file!(path)
+        %{admin_user_id: id, admin_email: email, admin_password_hash: password_hash!(password)}
 
       {_users, [[id, _email, password, _]]} when is_binary(password) ->
-        %{admin_user_id: id, admin_password_hash: nil}
+        %{admin_user_id: id, admin_email: nil, admin_password_hash: nil}
 
       _ ->
         raise ArgumentError, "SQLite source does not satisfy the bootstrap administrator contract"
@@ -666,10 +674,12 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
 
   defp maybe_update_admin_user(%{id: id} = row, %{table: "users"}, %{
          admin_user_id: id,
+         admin_email: admin_email,
          admin_password_hash: admin_password_hash
        }) do
     if admin_password_hash do
       row
+      |> Map.put(:email, admin_email)
       |> Map.put(:hashed_password, admin_password_hash)
       |> Map.put(:is_admin, true)
     else

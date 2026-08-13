@@ -13,7 +13,7 @@ services:
       DATABASE_PATH: /var/lib/whisperlogs/db.sqlite
       WHISPERLOGS_BIND_IP: 0.0.0.0
       PHX_HOST: localhost
-      WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL: local@localhost
+      WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL: ${WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL:?Set WHISPERLOGS_BOOTSTRAP_ADMIN_EMAIL to the administrator email}
       WHISPERLOGS_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/whisperlogs_admin_password
       WHISPERLOGS_EXPORT_ROOT: /var/lib/whisperlogs/exports
       # Required in PostgreSQL mode; SQLite persists one beside the database:
