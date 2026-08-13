@@ -49,6 +49,11 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:scroll_to_date, "")
      |> assign(:scroll_to_time, "")
      |> assign(:log_buffer, [])
+     |> assign(:query_generation, 0)
+     |> assign(:fetch_task_name, nil)
+     |> assign(:backfill_task_name, nil)
+     |> assign(:hydrating_logs?, false)
+     |> assign(:hydration_logs, [])
      |> assign(:flush_timer_ref, if(connected?(socket), do: schedule_flush(), else: nil))
      |> stream(:logs, [])}
   end
@@ -66,6 +71,7 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   defp flush_buffer(%{assigns: %{log_buffer: []}} = socket), do: socket
+  defp flush_buffer(%{assigns: %{hydrating_logs?: true}} = socket), do: socket
 
   defp flush_buffer(socket) do
     buffer = socket.assigns.log_buffer
@@ -1052,25 +1058,27 @@ defmodule WhisperLogsWeb.LogsLive do
     filters = params_to_filters(params)
 
     if connected?(socket) do
+      socket = invalidate_hydration(socket)
+      generation = socket.assigns.query_generation
+      task_name = {:fetch_logs, generation}
+
       {:noreply,
        socket
        |> assign(:filters, filters)
        |> assign(:loading_logs?, true)
+       |> assign(:fetch_task_name, task_name)
+       |> assign(:hydrating_logs?, true)
+       |> assign(:hydration_logs, [])
+       |> assign(:cursor_top, nil)
+       |> assign(:cursor_bottom, nil)
+       |> assign(:has_older?, false)
+       |> assign(:has_newer?, false)
+       |> assign(:log_buffer, [])
        |> stream(:logs, [], reset: true)
-       |> start_async(:fetch_logs, fn ->
-         opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
-         logs = Logs.list_logs(opts) |> Enum.reverse()
-         {cursor_top, cursor_bottom} = extract_cursors(logs)
-
-         has_older? =
-           cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
-
-         %{
-           logs: logs,
-           cursor_top: cursor_top,
-           cursor_bottom: cursor_bottom,
-           has_older?: has_older?
-         }
+       |> start_async(task_name, fn ->
+         opts = filter_opts(filters) |> Keyword.put(:limit, @per_page)
+         page = Logs.list_logs_page(opts)
+         %{logs: Enum.reverse(page.logs), has_older?: page.has_more?}
        end)}
     else
       {:noreply, assign(socket, :filters, filters)}
@@ -1078,22 +1086,67 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   @impl true
-  def handle_async(:fetch_logs, {:ok, result}, socket) do
+  def handle_async({:fetch_logs, generation}, {:ok, result}, socket)
+      when generation == socket.assigns.query_generation do
+    {cursor_top, cursor_bottom} = extract_cursors(result.logs)
+
+    socket =
+      socket
+      |> assign(:loading_logs?, false)
+      |> assign(:fetch_task_name, nil)
+      |> assign(:hydration_logs, result.logs)
+      |> assign(:cursor_top, cursor_top)
+      |> assign(:cursor_bottom, cursor_bottom)
+      |> assign(:has_older?, false)
+      |> assign(:has_newer?, false)
+      |> assign(:at_bottom?, true)
+      |> assign(:far_from_bottom?, false)
+      |> stream(:logs, result.logs, reset: true)
+
+    if result.has_older? and cursor_top != nil do
+      task_name = {:backfill_logs, generation}
+      filters = socket.assigns.filters
+
+      {:noreply,
+       socket
+       |> assign(:backfill_task_name, task_name)
+       |> start_async(task_name, fn ->
+         opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs - @per_page)
+         Logs.list_logs_before_page(cursor_top, opts)
+       end)}
+    else
+      {:noreply, finish_hydration(socket, [], false)}
+    end
+  end
+
+  def handle_async({:fetch_logs, generation}, {:exit, _reason}, socket)
+      when generation == socket.assigns.query_generation do
     {:noreply,
      socket
      |> assign(:loading_logs?, false)
-     |> assign(:cursor_top, result.cursor_top)
-     |> assign(:cursor_bottom, result.cursor_bottom)
-     |> assign(:has_older?, result.has_older?)
-     |> assign(:has_newer?, false)
-     |> assign(:at_bottom?, true)
-     |> assign(:far_from_bottom?, false)
-     |> assign(:log_buffer, [])
-     |> stream(:logs, result.logs, reset: true)}
+     |> assign(:fetch_task_name, nil)
+     |> finish_hydration([], false)}
   end
 
-  def handle_async(:fetch_logs, {:exit, _reason}, socket) do
-    {:noreply, assign(socket, :loading_logs?, false)}
+  def handle_async({:backfill_logs, generation}, {:ok, page}, socket)
+      when generation == socket.assigns.query_generation do
+    {:noreply,
+     socket
+     |> assign(:backfill_task_name, nil)
+     |> finish_hydration(page.logs, page.has_more?)}
+  end
+
+  def handle_async({:backfill_logs, generation}, {:exit, _reason}, socket)
+      when generation == socket.assigns.query_generation do
+    {:noreply,
+     socket
+     |> assign(:backfill_task_name, nil)
+     |> finish_hydration([], true)}
+  end
+
+  def handle_async({task, _generation}, _result, socket)
+      when task in [:fetch_logs, :backfill_logs] do
+    {:noreply, socket}
   end
 
   @impl true
@@ -1218,14 +1271,16 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   def handle_event("load-older", _params, socket) do
-    %{cursor_top: cursor, filters: filters, has_older?: has_older?} = socket.assigns
+    %{cursor_top: cursor, filters: filters, has_older?: has_older?, hydrating_logs?: hydrating?} =
+      socket.assigns
 
-    if is_nil(cursor) or not has_older? do
+    if is_nil(cursor) or not has_older? or hydrating? do
       {:reply, %{}, socket}
     else
       socket = assign(socket, :loading_older?, true)
       opts = filter_opts(filters) |> Keyword.put(:limit, @per_page)
-      older_logs = Logs.list_logs_before(cursor, opts)
+      page = Logs.list_logs_before_page(cursor, opts)
+      older_logs = page.logs
 
       socket =
         if older_logs == [] do
@@ -1236,7 +1291,6 @@ defmodule WhisperLogsWeb.LogsLive do
           # older_logs is in desc order (newest first), so last is the oldest
           oldest = List.last(older_logs)
           new_cursor_top = {oldest.inserted_at, oldest.id}
-          still_has_older? = Logs.has_logs_before?(new_cursor_top, filter_opts(filters))
 
           # After prepending with limit, some logs are pruned from the end.
           # Recalculate cursor_bottom: query @max_logs from new_cursor_top to find the new "bottom"
@@ -1259,7 +1313,7 @@ defmodule WhisperLogsWeb.LogsLive do
           socket
           |> assign(:cursor_top, new_cursor_top)
           |> assign(:cursor_bottom, new_cursor_bottom)
-          |> assign(:has_older?, still_has_older?)
+          |> assign(:has_older?, page.has_more?)
           |> assign(:has_newer?, true)
           |> assign(:loading_older?, false)
           |> stream(:logs, older_logs, at: 0, limit: @max_logs)
@@ -1270,14 +1324,21 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   def handle_event("load-newer", _params, socket) do
-    %{cursor_bottom: cursor, filters: filters, has_newer?: has_newer?} = socket.assigns
+    %{
+      cursor_bottom: cursor,
+      filters: filters,
+      has_newer?: has_newer?,
+      hydrating_logs?: hydrating?
+    } =
+      socket.assigns
 
-    if is_nil(cursor) or not has_newer? do
+    if is_nil(cursor) or not has_newer? or hydrating? do
       {:reply, %{}, socket}
     else
       socket = assign(socket, :loading_newer?, true)
       opts = filter_opts(filters) |> Keyword.put(:limit, @per_page)
-      newer_logs = Logs.list_logs_after(cursor, opts)
+      page = Logs.list_logs_after_page(cursor, opts)
+      newer_logs = page.logs
 
       socket =
         if newer_logs == [] do
@@ -1288,11 +1349,10 @@ defmodule WhisperLogsWeb.LogsLive do
           # newer_logs is in asc order (oldest first), so last is the newest
           newest = List.last(newer_logs)
           new_cursor_bottom = {newest.inserted_at, newest.id}
-          still_has_newer? = Logs.has_logs_after?(new_cursor_bottom, filter_opts(filters))
 
           socket
           |> assign(:cursor_bottom, new_cursor_bottom)
-          |> assign(:has_newer?, still_has_newer?)
+          |> assign(:has_newer?, page.has_more?)
           |> assign(:has_older?, true)
           |> assign(:loading_newer?, false)
           |> stream(:logs, newer_logs, at: -1, limit: -@max_logs)
@@ -1304,15 +1364,17 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("jump-to-latest", _params, socket) do
     filters = socket.assigns.filters
-    logs = fetch_logs(filters)
+    opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
+    page = Logs.list_logs_page(opts)
+    logs = Enum.reverse(page.logs)
     {cursor_top, cursor_bottom} = extract_cursors(logs)
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
 
     {:noreply,
      socket
+     |> invalidate_hydration()
      |> assign(:cursor_top, cursor_top)
      |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
+     |> assign(:has_older?, page.has_more?)
      |> assign(:has_newer?, false)
      |> assign(:at_bottom?, true)
      |> assign(:far_from_bottom?, false)
@@ -1356,21 +1418,18 @@ defmodule WhisperLogsWeb.LogsLive do
     cursor = {timestamp, id}
 
     filters = default_filters()
-    logs = Logs.list_logs_around(cursor, limit: @max_logs)
+    page = Logs.list_logs_around_page(cursor, limit: @max_logs)
+    logs = page.logs
     {cursor_top, cursor_bottom} = extract_cursors(logs)
-
-    has_older? = cursor_top != nil and Logs.has_logs_before?(cursor_top, filter_opts(filters))
-
-    has_newer? =
-      cursor_bottom != nil and Logs.has_logs_after?(cursor_bottom, filter_opts(filters))
 
     {:noreply,
      socket
+     |> invalidate_hydration()
      |> assign(:filters, filters)
      |> assign(:cursor_top, cursor_top)
      |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, has_older?)
-     |> assign(:has_newer?, has_newer?)
+     |> assign(:has_older?, page.has_older?)
+     |> assign(:has_newer?, page.has_newer?)
      |> assign(:at_bottom?, false)
      |> assign(:log_buffer, [])
      |> stream(:logs, logs, reset: true)
@@ -1413,6 +1472,76 @@ defmodule WhisperLogsWeb.LogsLive do
     {:noreply, socket}
   end
 
+  defp invalidate_hydration(socket) do
+    socket
+    |> maybe_cancel_async(socket.assigns.fetch_task_name)
+    |> maybe_cancel_async(socket.assigns.backfill_task_name)
+    |> assign(:query_generation, socket.assigns.query_generation + 1)
+    |> assign(:fetch_task_name, nil)
+    |> assign(:backfill_task_name, nil)
+    |> assign(:loading_logs?, false)
+    |> assign(:hydrating_logs?, false)
+    |> assign(:hydration_logs, [])
+    |> assign(:log_buffer, [])
+  end
+
+  defp maybe_cancel_async(socket, nil), do: socket
+  defp maybe_cancel_async(socket, task_name), do: cancel_async(socket, task_name)
+
+  defp finish_hydration(socket, older_logs, more_older?) do
+    initial_logs = socket.assigns.hydration_logs
+    buffered_logs = Enum.reverse(socket.assigns.log_buffer)
+    include_buffer? = socket.assigns.at_bottom?
+
+    base_logs = ordered_unique_logs(Enum.reverse(older_logs) ++ initial_logs)
+
+    visible_logs =
+      if include_buffer?,
+        do: ordered_unique_logs(base_logs ++ buffered_logs),
+        else: base_logs
+
+    visible_logs = Enum.take(visible_logs, -@max_logs)
+    visible_ids = MapSet.new(visible_logs, & &1.id)
+    initial_ids = MapSet.new(initial_logs, & &1.id)
+    buffered_ids = MapSet.new(buffered_logs, & &1.id)
+
+    older_to_insert =
+      visible_logs
+      |> Enum.reject(&(MapSet.member?(initial_ids, &1.id) or MapSet.member?(buffered_ids, &1.id)))
+      |> Enum.reverse()
+
+    buffered_to_insert =
+      Enum.reject(visible_logs, fn log ->
+        not MapSet.member?(buffered_ids, log.id) or MapSet.member?(initial_ids, log.id)
+      end)
+
+    {cursor_top, cursor_bottom} = extract_cursors(visible_logs)
+
+    pruned_older? =
+      Enum.any?(base_logs, fn log -> not MapSet.member?(visible_ids, log.id) end)
+
+    socket
+    |> assign(:loading_logs?, false)
+    |> assign(:hydrating_logs?, false)
+    |> assign(:hydration_logs, [])
+    |> assign(:log_buffer, [])
+    |> assign(:cursor_top, cursor_top)
+    |> assign(:cursor_bottom, cursor_bottom)
+    |> assign(:has_older?, more_older? or pruned_older?)
+    |> assign(
+      :has_newer?,
+      socket.assigns.has_newer? or (not include_buffer? and buffered_logs != [])
+    )
+    |> stream(:logs, older_to_insert, at: 0, limit: @max_logs)
+    |> stream(:logs, buffered_to_insert, at: -1, limit: -@max_logs)
+  end
+
+  defp ordered_unique_logs(logs) do
+    logs
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.sort_by(fn log -> {DateTime.to_unix(log.inserted_at, :microsecond), log.id} end)
+  end
+
   defp do_scroll_to_time(socket, date, time) do
     # Parse date and time from local timezone to UTC
     # Time input with step=1 already includes seconds (HH:MM:SS)
@@ -1427,14 +1556,13 @@ defmodule WhisperLogsWeb.LogsLive do
       # Create cursor and fetch logs around that time
       cursor = {utc_dt, 0}
       filters = default_filters() |> Map.put(:time_range, "all")
-      logs = Logs.list_logs_around(cursor, limit: @max_logs)
+      page = Logs.list_logs_around_page(cursor, limit: @max_logs)
+      logs = page.logs
 
       if logs == [] do
         {:noreply, socket |> put_flash(:info, "No logs found around that time")}
       else
         {cursor_top, cursor_bottom} = extract_cursors(logs)
-        has_older? = Logs.has_logs_before?(cursor_top, [])
-        has_newer? = Logs.has_logs_after?(cursor_bottom, [])
 
         # Find the first log at or after the target time
         target_log =
@@ -1444,11 +1572,12 @@ defmodule WhisperLogsWeb.LogsLive do
 
         {:noreply,
          socket
+         |> invalidate_hydration()
          |> assign(:filters, filters)
          |> assign(:cursor_top, cursor_top)
          |> assign(:cursor_bottom, cursor_bottom)
-         |> assign(:has_older?, has_older?)
-         |> assign(:has_newer?, has_newer?)
+         |> assign(:has_older?, page.has_older?)
+         |> assign(:has_newer?, page.has_newer?)
          |> assign(:at_bottom?, false)
          |> stream(:logs, logs, reset: true)
          |> push_event("scroll-to-log", %{log_id: target_log.id})}
@@ -1515,11 +1644,6 @@ defmodule WhisperLogsWeb.LogsLive do
       filters.source != "" or
       filters.levels != ~w(debug info warning error) or
       filters.time_range != "3h"
-  end
-
-  defp fetch_logs(filters) do
-    opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
-    Logs.list_logs(opts) |> Enum.reverse()
   end
 
   defp log_matches_filters?(log, filters) do

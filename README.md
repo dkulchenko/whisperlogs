@@ -314,10 +314,13 @@ that already has application rows.
 ### SQLite text search index
 
 SQLite installations maintain a contentless FTS5 trigram index for message and metadata substring
-searches. WhisperLogs uses it only for selective searches over broad observed-time windows; narrow
-windows, common terms, terms shorter than three characters, regexes, and negative-only searches
-continue to use the ordered log indexes. FTS candidates are rechecked with the original predicates,
-so routing does not change search results.
+searches. WhisperLogs uses it only for selective searches over broad observed-time windows. Plain
+terms, metadata key/value filters, metadata keys from numeric comparisons, and conservative
+mandatory literals from positive regexes can generate candidates. Narrow windows, common or short
+terms, regexes without a safely required literal, and negative-only searches continue to use the
+ordered log indexes. Candidate counting and retrieval happen inside the requested observed-time
+window. FTS candidates are rechecked with the original predicates, so routing does not change
+search results.
 
 The migration that first creates this index backfills every stored log and blocks ingestion until
 it completes. Plan the first deployment as a maintenance window and keep at least several gigabytes

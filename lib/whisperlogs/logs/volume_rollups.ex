@@ -192,7 +192,7 @@ defmodule WhisperLogs.Logs.VolumeRollups do
 
   defp byte_size_sql do
     if DbAdapter.sqlite?() do
-      "length(CAST(message AS BLOB)) + length(CAST(coalesce(json(metadata), '{}') AS BLOB))"
+      "length(CAST(message AS BLOB)) + length(CAST(coalesce(metadata, '{}') AS BLOB))"
     else
       "octet_length(message) + octet_length(coalesce(metadata::text, '{}'))"
     end

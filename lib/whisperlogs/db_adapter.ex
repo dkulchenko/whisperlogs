@@ -67,7 +67,7 @@ defmodule WhisperLogs.DbAdapter do
       dynamic(
         [l],
         fragment("? LIKE ? ESCAPE '\\'", l.message, ^pattern) or
-          fragment("json(?) LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
+          fragment("? LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
       )
     else
       dynamic([l], ilike(l.message, ^pattern) or ilike(fragment("?::text", l.metadata), ^pattern))
@@ -86,7 +86,7 @@ defmodule WhisperLogs.DbAdapter do
       dynamic(
         [l],
         fragment("? REGEXP ?", l.message, ^ci_pattern) or
-          fragment("json(?) REGEXP ?", l.metadata, ^ci_pattern)
+          fragment("? REGEXP ?", l.metadata, ^ci_pattern)
       )
     else
       dynamic(
@@ -107,7 +107,7 @@ defmodule WhisperLogs.DbAdapter do
       dynamic(
         [l],
         fragment("NOT (? REGEXP ?)", l.message, ^ci_pattern) and
-          fragment("NOT (json(?) REGEXP ?)", l.metadata, ^ci_pattern)
+          fragment("NOT (? REGEXP ?)", l.metadata, ^ci_pattern)
       )
     else
       dynamic(
@@ -126,7 +126,7 @@ defmodule WhisperLogs.DbAdapter do
       dynamic(
         [l],
         fragment("? NOT LIKE ? ESCAPE '\\'", l.message, ^pattern) and
-          fragment("json(?) NOT LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
+          fragment("? NOT LIKE ? ESCAPE '\\'", l.metadata, ^pattern)
       )
     else
       dynamic(
@@ -137,38 +137,17 @@ defmodule WhisperLogs.DbAdapter do
   end
 
   @doc """
-  Level equality - matches level field OR metadata.level.
+  Level equality on the canonical schema field.
   """
   def level_eq(level) do
-    if sqlite?() do
-      dynamic(
-        [l],
-        l.level == ^level or fragment("json_extract(?, ?)", l.metadata, "$.level") == ^level
-      )
-    else
-      dynamic([l], l.level == ^level or fragment("?->>?", l.metadata, "level") == ^level)
-    end
+    dynamic([l], l.level == ^level)
   end
 
   @doc """
-  Level exclusion - matches if level field != value AND metadata.level is null or != value.
+  Level exclusion on the canonical schema field.
   """
   def level_neq(level) do
-    if sqlite?() do
-      dynamic(
-        [l],
-        l.level != ^level and
-          (fragment("json_extract(?, ?) IS NULL", l.metadata, "$.level") or
-             fragment("json_extract(?, ?)", l.metadata, "$.level") != ^level)
-      )
-    else
-      dynamic(
-        [l],
-        l.level != ^level and
-          (fragment("?->>? IS NULL", l.metadata, "level") or
-             fragment("?->>?", l.metadata, "level") != ^level)
-      )
-    end
+    dynamic([l], l.level != ^level)
   end
 
   @doc """
@@ -279,7 +258,7 @@ defmodule WhisperLogs.DbAdapter do
       dynamic(
         [l],
         fragment(
-          "length(CAST(? AS BLOB)) + length(CAST(coalesce(json(?), '{}') AS BLOB))",
+          "length(CAST(? AS BLOB)) + length(CAST(coalesce(?, '{}') AS BLOB))",
           l.message,
           l.metadata
         )
@@ -303,7 +282,7 @@ defmodule WhisperLogs.DbAdapter do
         timestamp:
           type(fragment("strftime('%Y-%m-%dT%H:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
-        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+        bytes: sum(fragment("length(?) + length(coalesce(?, '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
@@ -330,7 +309,7 @@ defmodule WhisperLogs.DbAdapter do
         timestamp:
           type(fragment("strftime('%Y-%m-%dT00:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
-        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+        bytes: sum(fragment("length(?) + length(coalesce(?, '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
@@ -357,7 +336,7 @@ defmodule WhisperLogs.DbAdapter do
         timestamp:
           type(fragment("strftime('%Y-%m-01T00:00:00Z', ?)", l.inserted_at), :utc_datetime),
         count: count(l.id),
-        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+        bytes: sum(fragment("length(?) + length(coalesce(?, '{}'))", l.message, l.metadata))
       })
     else
       dynamic([l], %{
@@ -386,7 +365,7 @@ defmodule WhisperLogs.DbAdapter do
         bytes:
           sum(
             fragment(
-              "length(CAST(? AS BLOB)) + length(CAST(coalesce(json(?), '{}') AS BLOB))",
+              "length(CAST(? AS BLOB)) + length(CAST(coalesce(?, '{}') AS BLOB))",
               l.message,
               l.metadata
             )

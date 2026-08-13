@@ -5,6 +5,7 @@ defmodule WhisperLogsWeb.LogsLiveTest do
   import WhisperLogs.LogsFixtures
 
   alias WhisperLogs.Accounts.User
+  alias WhisperLogs.Logs
   alias WhisperLogs.Repo
 
   # In SQLite mode, a local@localhost user is expected to exist
@@ -73,6 +74,24 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       html = render_async(lv)
 
       assert html =~ "my-app-logs"
+    end
+
+    test "backfills the initial 100-row paint and retains logs arriving during hydration", %{
+      conn: conn
+    } do
+      events = Enum.map(1..150, &%{"message" => "hydration log #{&1}"})
+      assert {:ok, inserted} = Logs.insert_batch("hydration-source", events)
+
+      {:ok, lv, _html} = live(conn, ~p"/")
+      new_log = log_fixture("hydration-source", message: "arrived during hydration")
+
+      _ = :sys.get_state(lv.pid)
+      send(lv.pid, :flush_log_buffer)
+      render_async(lv)
+
+      assert has_element?(lv, "#logs-#{List.first(inserted).id}")
+      assert has_element?(lv, "#logs-#{List.last(inserted).id}")
+      assert has_element?(lv, "#logs-#{new_log.id}")
     end
   end
 
@@ -143,6 +162,26 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       assert html =~ "Info message"
       assert html =~ "Warning message"
       assert html =~ "Error message"
+    end
+
+    test "ignores stale async results when filters change rapidly", %{conn: conn} do
+      old_result = log_fixture("test-source", message: "stale-filter-result")
+      current_result = log_fixture("test-source", message: "current-filter-result")
+
+      {:ok, lv, _html} = live(conn, ~p"/")
+
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => "stale-filter-result"})
+
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => "current-filter-result"})
+
+      render_async(lv)
+
+      refute has_element?(lv, "#logs-#{old_result.id}")
+      assert has_element?(lv, "#logs-#{current_result.id}")
     end
   end
 

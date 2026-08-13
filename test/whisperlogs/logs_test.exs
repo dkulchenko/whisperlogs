@@ -42,6 +42,66 @@ defmodule WhisperLogs.LogsTest do
     end
   end
 
+  describe "canonical level filtering" do
+    test "does not let metadata.level override the stored level" do
+      assert {:ok, [info, error]} =
+               Logs.insert_batch("api", [
+                 %{
+                   "level" => "info",
+                   "message" => "canonical info",
+                   "metadata" => %{"level" => "error"}
+                 },
+                 %{
+                   "level" => "error",
+                   "message" => "canonical error",
+                   "metadata" => %{"level" => "info"}
+                 }
+               ])
+
+      assert Logs.list_logs(search: "level:error") |> Enum.map(& &1.id) == [error.id]
+      assert Logs.list_logs(search: "-level:error") |> Enum.map(& &1.id) == [info.id]
+    end
+  end
+
+  describe "cursor pages" do
+    test "returns limit plus one pagination information without changing list helpers" do
+      events = Enum.map(1..5, &%{"message" => "page #{&1}"})
+      assert {:ok, inserted} = Logs.insert_batch("api", events)
+
+      first_page = Logs.list_logs_page(limit: 2)
+      assert first_page.has_more?
+
+      assert Enum.map(first_page.logs, & &1.id) ==
+               inserted |> Enum.reverse() |> Enum.take(2) |> Enum.map(& &1.id)
+
+      assert Logs.list_logs(limit: 2) == first_page.logs
+
+      oldest = List.last(first_page.logs)
+      second_page = Logs.list_logs_before_page({oldest.inserted_at, oldest.id}, limit: 2)
+      assert second_page.has_more?
+
+      oldest = List.last(second_page.logs)
+      newer_page = Logs.list_logs_after_page({oldest.inserted_at, oldest.id}, limit: 2)
+      assert newer_page.has_more?
+
+      assert Enum.map(newer_page.logs, & &1.id) ==
+               inserted |> Enum.slice(2, 2) |> Enum.map(& &1.id)
+    end
+
+    test "reports both edges for context pages" do
+      events = Enum.map(1..7, &%{"message" => "context #{&1}"})
+      assert {:ok, inserted} = Logs.insert_batch("api", events)
+      target = Enum.at(inserted, 3)
+
+      page = Logs.list_logs_around_page({target.inserted_at, target.id}, limit: 4)
+
+      assert length(page.logs) == 4
+      assert page.has_older?
+      assert page.has_newer?
+      assert target.id in Enum.map(page.logs, & &1.id)
+    end
+  end
+
   describe "search with timestamp filter" do
     setup do
       now = DateTime.utc_now()

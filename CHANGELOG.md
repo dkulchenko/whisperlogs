@@ -1,5 +1,35 @@
 # Changelog
 
+## v0.8.0 - 2026-08-12
+
+### Faster structured and regex search
+
+- Extend SQLite's FTS5 candidate planner to positive metadata key/value filters,
+  metadata-key candidates for numeric comparisons, and conservative mandatory
+  literals from positive regexes. Candidate caps and final FTS subqueries now
+  apply the observed-time window before exact predicates recheck every result.
+- Avoid redundant SQLite JSON serialization during message/metadata text and
+  regex searches, FTS trigger maintenance, and log-volume byte accounting.
+- Make `level:` and `-level:` authoritative on the canonical `logs.level`
+  column; metadata named `level` no longer changes level-filter results.
+
+### Faster initial browsing
+
+- Return pagination edge state with each limit-plus-one query, eliminating
+  redundant existence queries on common browsing paths.
+- Paint the newest 100 logs first, then asynchronously backfill the remaining
+  400-row scroll buffer while preserving live-tail arrivals and discarding
+  canceled or stale filter results.
+
+### Upgrade notes
+
+- The SQLite migration replaces only the insert and update FTS maintenance
+  triggers so future writes use the already-canonical metadata text. It does not
+  rebuild the FTS index and requires no manual database maintenance.
+- A real `request_id:<value>` lookup against the 3.43-million-row production
+  copy improved from approximately 2.12 seconds to 5.7 milliseconds while the
+  original JSON predicate continued to validate every FTS candidate.
+
 ## v0.7.0 - 2026-08-12
 
 ### Fast SQLite search and metrics

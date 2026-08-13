@@ -208,13 +208,19 @@ defmodule WhisperLogs.Logs do
 
   """
   def list_logs(opts \\ []) do
+    list_logs_page(opts).logs
+  end
+
+  @doc """
+  Lists one newest-first page and reports whether another older row exists.
+  """
+  def list_logs_page(opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
     |> order_by([l], desc: l.inserted_at, desc: l.id)
     |> apply_filters(opts)
-    |> limit(^limit)
-    |> Repo.all()
+    |> fetch_page(limit)
   end
 
   @doc """
@@ -225,14 +231,20 @@ defmodule WhisperLogs.Logs do
   Returns logs in descending order (newest first within batch).
   """
   def list_logs_before({inserted_at, id}, opts \\ []) do
+    list_logs_before_page({inserted_at, id}, opts).logs
+  end
+
+  @doc """
+  Lists one newest-first page before the cursor and reports whether older rows remain.
+  """
+  def list_logs_before_page({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
     |> where([l], l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id))
     |> order_by([l], desc: l.inserted_at, desc: l.id)
     |> apply_filters(opts)
-    |> limit(^limit)
-    |> Repo.all()
+    |> fetch_page(limit)
   end
 
   @doc """
@@ -323,14 +335,20 @@ defmodule WhisperLogs.Logs do
   Returns logs in ascending order (oldest first within batch).
   """
   def list_logs_after({inserted_at, id}, opts \\ []) do
+    list_logs_after_page({inserted_at, id}, opts).logs
+  end
+
+  @doc """
+  Lists one oldest-first page after the cursor and reports whether newer rows remain.
+  """
+  def list_logs_after_page({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
     |> where([l], l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id))
     |> order_by([l], asc: l.inserted_at, asc: l.id)
     |> apply_filters(opts)
-    |> limit(^limit)
-    |> Repo.all()
+    |> fetch_page(limit)
   end
 
   @doc """
@@ -340,33 +358,46 @@ defmodule WhisperLogs.Logs do
   Cursor is an observed-time tuple `{inserted_at, id}` for the target log.
   """
   def list_logs_around({inserted_at, id}, opts \\ []) do
+    list_logs_around_page({inserted_at, id}, opts).logs
+  end
+
+  @doc """
+  Lists logs around a cursor and reports whether rows exist beyond either edge.
+  """
+  def list_logs_around_page({inserted_at, id}, opts \\ []) do
     limit = Keyword.get(opts, :limit, 100)
     half = div(limit, 2)
 
     # Get logs before (including target), descending then reverse
-    before_logs =
+    before_page =
       Log
       |> where(
         [l],
         l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id <= ^id)
       )
       |> order_by([l], desc: l.inserted_at, desc: l.id)
-      |> limit(^half)
-      |> Repo.all()
-      |> Enum.reverse()
+      |> fetch_page(half)
 
     # Get logs after target (excluding target), ascending
-    after_logs =
+    after_page =
       Log
       |> where(
         [l],
         l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id)
       )
       |> order_by([l], asc: l.inserted_at, asc: l.id)
-      |> limit(^half)
-      |> Repo.all()
+      |> fetch_page(half)
 
-    before_logs ++ after_logs
+    %{
+      logs: Enum.reverse(before_page.logs) ++ after_page.logs,
+      has_older?: before_page.has_more?,
+      has_newer?: after_page.has_more?
+    }
+  end
+
+  defp fetch_page(query, limit) do
+    logs = query |> limit(^(limit + 1)) |> Repo.all()
+    %{logs: Enum.take(logs, limit), has_more?: length(logs) > limit}
   end
 
   @doc """
@@ -581,7 +612,7 @@ defmodule WhisperLogs.Logs do
     end
   end
 
-  # Level filter - exact match on level field OR metadata.level
+  # Level filter - exact match on the canonical level field
   defp apply_search_token({:level_filter, level}, query) do
     where(query, ^DbAdapter.level_eq(level))
   end

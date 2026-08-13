@@ -61,9 +61,10 @@ to the authorizing user and exact query.
 controls default ordering/pagination, structured MCP time bounds, metrics, alert windows/cursors,
 retention, and scheduled exports. Explicit `timestamp:` search and manual export ranges continue
 to use event time.
-`level:` and `source:` search match either the dedicated column or the metadata value. Numeric
-metadata comparisons accept JSON numbers and canonical decimal strings up to 128 bytes; other
-JSON types and malformed values do not match, including under negation.
+`level:` search uses the canonical level column. `source:` intentionally matches either the
+dedicated column or the metadata value. Numeric metadata comparisons accept JSON numbers and
+canonical decimal strings up to 128 bytes; other JSON types and malformed values do not match,
+including under negation.
 
 HTTP and syslog share atomic event validation. A failed event rejects the complete batch. The
 following positive integer settings are parsed and validated at startup:
@@ -81,11 +82,13 @@ Non-identity request content encodings are rejected. There is intentionally no s
 per-source request budget or total application storage quota: operators must size, monitor, and
 retain the database for valid sustained traffic.
 
-SQLite plain-term and quoted-phrase searches may use a contentless FTS5 trigram candidate index.
-The original substring predicates always recheck candidates. Narrow observed-time windows and
-nonselective, short, regex, or negative-only searches retain the ordered scan path. FTS maintenance
-is transactional with log insertion and deletion; the initial backfill migration blocks ingestion
-and requires temporary disk capacity for the index and WAL.
+SQLite plain terms, quoted phrases, positive metadata filters, and positive regexes with safely
+extractable mandatory literals may use a contentless FTS5 trigram candidate index. Metadata numeric
+comparisons use their key as a candidate. Candidate counting and retrieval apply structured
+observed-time bounds before the original predicates recheck every candidate. Narrow windows and
+nonselective, short, unsafe-regex, or negative-only searches retain the ordered scan path. FTS
+maintenance is transactional with log insertion and deletion; the initial backfill migration
+blocks ingestion and requires temporary disk capacity for the index and WAL.
 
 ## Alerts
 
