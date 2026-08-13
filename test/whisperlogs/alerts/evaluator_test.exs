@@ -3,6 +3,7 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
 
   alias WhisperLogs.Alerts
   alias WhisperLogs.Alerts.Evaluator
+  alias WhisperLogs.Logs
 
   import WhisperLogs.AccountsFixtures
   import WhisperLogs.AlertsFixtures
@@ -108,6 +109,38 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       updated_alert = Alerts.get_alert(user_scope_fixture(user), alert.id)
       assert updated_alert.last_triggered_at != nil
       assert updated_alert.last_seen_log_id == log2.id
+    end
+
+    test "advances through matching logs with tied observed times" do
+      user = user_fixture()
+      scope = user_scope_fixture(user)
+      alert = any_match_alert_fixture(user, search_query: "tied-alert", cooldown_seconds: 60)
+
+      assert {:ok, inserted} =
+               Logs.insert_batch("test-source", [
+                 %{"level" => "error", "message" => "tied-alert one"},
+                 %{"level" => "error", "message" => "tied-alert two"},
+                 %{"level" => "error", "message" => "tied-alert three"}
+               ])
+
+      final_alert =
+        Enum.reduce(inserted, alert, fn expected_log, current_alert ->
+          expire_cooldown(current_alert)
+          trigger_evaluation()
+
+          updated_alert = Alerts.get_alert(scope, alert.id)
+          assert updated_alert.last_seen_inserted_at == expected_log.inserted_at
+          assert updated_alert.last_seen_log_id == expected_log.id
+          updated_alert
+        end)
+
+      assert final_alert.last_seen_log_id == List.last(inserted).id
+
+      history_ids =
+        Alerts.list_alert_history(scope, alert.id)
+        |> Enum.map(& &1.trigger_data["log_id"])
+
+      assert Enum.sort(history_ids) == Enum.sort(Enum.map(inserted, & &1.id))
     end
 
     test "respects cooldown period" do
@@ -438,5 +471,13 @@ defmodule WhisperLogs.Alerts.EvaluatorTest do
       assert updated_alert1.last_checked_at != nil
       assert updated_alert2.last_checked_at != nil
     end
+  end
+
+  defp expire_cooldown(%{last_triggered_at: nil} = alert), do: alert
+
+  defp expire_cooldown(alert) do
+    expired_at = DateTime.utc_now() |> DateTime.add(-120, :second) |> DateTime.truncate(:second)
+    assert {:ok, alert} = Alerts.update_alert_state(alert, %{last_triggered_at: expired_at})
+    alert
   end
 end

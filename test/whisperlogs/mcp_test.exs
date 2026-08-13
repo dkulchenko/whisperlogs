@@ -2,6 +2,7 @@ defmodule WhisperLogs.MCPTest do
   use WhisperLogs.DataCase, async: true
 
   alias WhisperLogs.Accounts.Scope
+  alias WhisperLogs.Logs
   alias WhisperLogs.MCP
 
   import WhisperLogs.AccountsFixtures
@@ -49,6 +50,23 @@ defmodule WhisperLogs.MCPTest do
              MCP.call(other_scope, "search_logs", %{"query" => "needle", "cursor" => cursor})
 
     assert wrong_user["isError"]
+  end
+
+  test "pages logs with tied observed times without duplicates" do
+    scope = user_fixture() |> Scope.for_user()
+
+    assert {:ok, inserted} =
+             Logs.insert_batch("api", [
+               %{"message" => "tied cursor one"},
+               %{"message" => "tied cursor two"},
+               %{"message" => "tied cursor three"}
+             ])
+
+    {ids, cursor} = collect_mcp_pages(scope, "tied cursor", [], nil)
+
+    assert Enum.sort(ids) == Enum.sort(Enum.map(inserted, & &1.id))
+    assert length(Enum.uniq(ids)) == length(inserted)
+    assert is_nil(cursor)
   end
 
   test "rejects nonblank queries that parse to no valid tokens" do
@@ -149,5 +167,26 @@ defmodule WhisperLogs.MCPTest do
     assert schema["properties"]["query"]["default"] == ""
     assert description =~ "timestamp:>=2026-08-12T00:15:00Z"
     assert description =~ ~s(request_path:"/checkout")
+  end
+
+  defp collect_mcp_pages(scope, query, ids, cursor) do
+    arguments =
+      %{"query" => query, "limit" => 1}
+      |> then(fn arguments ->
+        if cursor, do: Map.put(arguments, "cursor", cursor), else: arguments
+      end)
+
+    assert {:ok, result} = MCP.call(scope, "search_logs", arguments)
+    assert result["isError"] == false
+
+    content = result["structuredContent"]
+    page_ids = Enum.map(content["logs"], & &1["id"])
+    ids = ids ++ page_ids
+
+    if content["has_more"] do
+      collect_mcp_pages(scope, query, ids, content["next_cursor"])
+    else
+      {ids, content["next_cursor"]}
+    end
   end
 end

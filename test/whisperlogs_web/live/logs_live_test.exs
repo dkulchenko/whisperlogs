@@ -82,7 +82,7 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       events = Enum.map(1..150, &%{"message" => "hydration log #{&1}"})
       assert {:ok, inserted} = Logs.insert_batch("hydration-source", events)
 
-      {:ok, lv, _html} = live(conn, ~p"/")
+      {:ok, lv, _html} = live(conn, ~p"/?t=30d")
       new_log = log_fixture("hydration-source", message: "arrived during hydration")
 
       _ = :sys.get_state(lv.pid)

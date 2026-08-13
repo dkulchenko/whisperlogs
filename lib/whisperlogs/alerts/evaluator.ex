@@ -140,21 +140,13 @@ defmodule WhisperLogs.Alerts.Evaluator do
   defp after_cursor(query, nil, _id), do: query
 
   defp after_cursor(query, inserted_at, id) do
-    where(
-      query,
-      [l],
-      l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^(id || 0))
-    )
+    where(query, ^WhisperLogs.DbAdapter.observed_after(inserted_at, id || 0))
   end
 
   defp through_cursor(query, {nil, _id}), do: where(query, [l], false)
 
   defp through_cursor(query, {inserted_at, id}) do
-    where(
-      query,
-      [l],
-      l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id <= ^id)
-    )
+    where(query, ^WhisperLogs.DbAdapter.observed_through(inserted_at, id))
   end
 
   defp advance_to_cursor(alert, {nil, _id}, checked_at) do

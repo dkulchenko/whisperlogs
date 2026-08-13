@@ -81,8 +81,51 @@ defmodule WhisperLogs.Logs.VolumeRollupsTest do
       assert source_plan =~ "logs_source_observed_time_index"
     end
 
+    test "SQLite cursor query plans remain ordered index range scans" do
+      cursor = ~U[2026-08-13 01:06:10.824287Z]
+      cursor_id = 17_222_072
+      lower_bound = ~U[2026-07-14 01:06:10.824287Z]
+      upper_bound = ~U[2026-08-14 01:06:10.824287Z]
+
+      queries = [
+        Log
+        |> where(^DbAdapter.observed_before(cursor, cursor_id))
+        |> where([l], l.inserted_at >= ^lower_bound)
+        |> order_by([l], desc: l.inserted_at, desc: l.id)
+        |> limit(401),
+        Log
+        |> where(^DbAdapter.observed_through(cursor, cursor_id))
+        |> where([l], l.inserted_at >= ^lower_bound)
+        |> order_by([l], desc: l.inserted_at, desc: l.id)
+        |> limit(401),
+        Log
+        |> where(^DbAdapter.observed_after(cursor, cursor_id))
+        |> where([l], l.inserted_at <= ^upper_bound)
+        |> order_by([l], asc: l.inserted_at, asc: l.id)
+        |> limit(401)
+      ]
+
+      for query <- queries do
+        plan = explain_query(query)
+
+        assert plan =~ "logs_observed_time_index"
+        refute plan =~ "MULTI-INDEX OR"
+        refute plan =~ "TEMP B-TREE"
+      end
+    end
+
     defp explain(sql) do
       Repo.query!("EXPLAIN QUERY PLAN " <> sql).rows
+      |> Enum.map_join("\n", fn row -> Enum.at(row, -1) end)
+    end
+
+    defp explain_query(query) do
+      {sql, params} = Ecto.Adapters.SQL.to_sql(:all, Repo.impl(), query)
+      explain(sql, params)
+    end
+
+    defp explain(sql, params) do
+      Repo.query!("EXPLAIN QUERY PLAN " <> sql, params).rows
       |> Enum.map_join("\n", fn row -> Enum.at(row, -1) end)
     end
   end

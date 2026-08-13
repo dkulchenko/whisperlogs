@@ -59,6 +59,57 @@ defmodule WhisperLogs.DbAdapter do
   # ===========================================================================
 
   @doc """
+  Matches logs strictly before an observed-time cursor.
+
+  The row-value comparison preserves `{inserted_at, id}` ordering while allowing
+  both SQLite and PostgreSQL to use the observed-time index as one ordered range.
+  """
+  def observed_before(inserted_at, id) do
+    dynamic(
+      [l],
+      fragment(
+        "(?, ?) < (?, ?)",
+        l.inserted_at,
+        l.id,
+        type(^inserted_at, :utc_datetime_usec),
+        type(^id, :id)
+      )
+    )
+  end
+
+  @doc """
+  Matches logs at or before an observed-time cursor.
+  """
+  def observed_through(inserted_at, id) do
+    dynamic(
+      [l],
+      fragment(
+        "(?, ?) <= (?, ?)",
+        l.inserted_at,
+        l.id,
+        type(^inserted_at, :utc_datetime_usec),
+        type(^id, :id)
+      )
+    )
+  end
+
+  @doc """
+  Matches logs strictly after an observed-time cursor.
+  """
+  def observed_after(inserted_at, id) do
+    dynamic(
+      [l],
+      fragment(
+        "(?, ?) > (?, ?)",
+        l.inserted_at,
+        l.id,
+        type(^inserted_at, :utc_datetime_usec),
+        type(^id, :id)
+      )
+    )
+  end
+
+  @doc """
   Text search in message OR metadata.
   Returns a dynamic that matches if pattern is found in either field.
   """

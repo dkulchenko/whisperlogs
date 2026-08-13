@@ -64,9 +64,10 @@ defmodule WhisperLogs.LogsTest do
   end
 
   describe "cursor pages" do
-    test "returns limit plus one pagination information without changing list helpers" do
+    test "pages tied observed times without gaps or duplicates" do
       events = Enum.map(1..5, &%{"message" => "page #{&1}"})
       assert {:ok, inserted} = Logs.insert_batch("api", events)
+      assert inserted |> Enum.map(& &1.inserted_at) |> Enum.uniq() |> length() == 1
 
       first_page = Logs.list_logs_page(limit: 2)
       assert first_page.has_more?
@@ -86,6 +87,25 @@ defmodule WhisperLogs.LogsTest do
 
       assert Enum.map(newer_page.logs, & &1.id) ==
                inserted |> Enum.slice(2, 2) |> Enum.map(& &1.id)
+
+      final_page = Logs.list_logs_before_page({oldest.inserted_at, oldest.id}, limit: 2)
+      refute final_page.has_more?
+      assert Enum.map(final_page.logs, & &1.id) == [List.first(inserted).id]
+
+      first = List.first(inserted)
+      last = List.last(inserted)
+
+      refute Logs.has_logs_before?({first.inserted_at, first.id})
+      assert Logs.has_logs_after?({first.inserted_at, first.id})
+      assert Logs.has_logs_before?({last.inserted_at, last.id})
+      refute Logs.has_logs_after?({last.inserted_at, last.id})
+
+      paged_ids =
+        (first_page.logs ++ second_page.logs ++ final_page.logs)
+        |> Enum.map(& &1.id)
+
+      assert Enum.sort(paged_ids) == Enum.sort(Enum.map(inserted, & &1.id))
+      assert length(Enum.uniq(paged_ids)) == length(inserted)
     end
 
     test "reports both edges for context pages" do
@@ -98,7 +118,9 @@ defmodule WhisperLogs.LogsTest do
       assert length(page.logs) == 4
       assert page.has_older?
       assert page.has_newer?
-      assert target.id in Enum.map(page.logs, & &1.id)
+
+      assert Enum.map(page.logs, & &1.id) ==
+               inserted |> Enum.slice(2, 4) |> Enum.map(& &1.id)
     end
   end
 

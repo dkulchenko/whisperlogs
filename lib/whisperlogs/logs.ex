@@ -241,7 +241,7 @@ defmodule WhisperLogs.Logs do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> where([l], l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id))
+    |> where(^DbAdapter.observed_before(inserted_at, id))
     |> order_by([l], desc: l.inserted_at, desc: l.id)
     |> apply_filters(opts)
     |> fetch_page(limit)
@@ -298,11 +298,7 @@ defmodule WhisperLogs.Logs do
   defp maybe_before(query, nil), do: query
 
   defp maybe_before(query, {inserted_at, id}) do
-    where(
-      query,
-      [l],
-      l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id)
-    )
+    where(query, ^DbAdapter.observed_before(inserted_at, id))
   end
 
   defp valid_timestamp_bounds?(nil, nil), do: true
@@ -345,7 +341,7 @@ defmodule WhisperLogs.Logs do
     limit = Keyword.get(opts, :limit, 100)
 
     Log
-    |> where([l], l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id))
+    |> where(^DbAdapter.observed_after(inserted_at, id))
     |> order_by([l], asc: l.inserted_at, asc: l.id)
     |> apply_filters(opts)
     |> fetch_page(limit)
@@ -371,20 +367,14 @@ defmodule WhisperLogs.Logs do
     # Get logs before (including target), descending then reverse
     before_page =
       Log
-      |> where(
-        [l],
-        l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id <= ^id)
-      )
+      |> where(^DbAdapter.observed_through(inserted_at, id))
       |> order_by([l], desc: l.inserted_at, desc: l.id)
       |> fetch_page(half)
 
     # Get logs after target (excluding target), ascending
     after_page =
       Log
-      |> where(
-        [l],
-        l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id)
-      )
+      |> where(^DbAdapter.observed_after(inserted_at, id))
       |> order_by([l], asc: l.inserted_at, asc: l.id)
       |> fetch_page(half)
 
@@ -405,7 +395,7 @@ defmodule WhisperLogs.Logs do
   """
   def has_logs_before?({inserted_at, id}, opts \\ []) do
     Log
-    |> where([l], l.inserted_at < ^inserted_at or (l.inserted_at == ^inserted_at and l.id < ^id))
+    |> where(^DbAdapter.observed_before(inserted_at, id))
     |> apply_filters(opts)
     |> limit(1)
     |> Repo.exists?()
@@ -416,7 +406,7 @@ defmodule WhisperLogs.Logs do
   """
   def has_logs_after?({inserted_at, id}, opts \\ []) do
     Log
-    |> where([l], l.inserted_at > ^inserted_at or (l.inserted_at == ^inserted_at and l.id > ^id))
+    |> where(^DbAdapter.observed_after(inserted_at, id))
     |> apply_filters(opts)
     |> limit(1)
     |> Repo.exists?()

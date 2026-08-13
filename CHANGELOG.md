@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.8.1 - 2026-08-13
+
+### Reliable long-range browsing
+
+- Express observed-time cursors as typed `(inserted_at, id)` row comparisons so
+  SQLite can walk the existing observed-time index in order instead of merging
+  separate index scans and sorting a temporary result set.
+- Apply the cursor fix consistently to LiveView pagination and context views,
+  MCP search pagination, existence checks, and alert evaluation boundaries.
+- Preserve stable pagination across logs sharing the same observed timestamp,
+  including inclusive context bounds and exclusive before/after pages.
+
+### Upgrade notes
+
+- No database migration, index rebuild, or manual maintenance is required.
+- On the 3.43-million-row production-derived SQLite snapshot, the generated
+  30-day 401-row backfill query improved from approximately five seconds to
+  2.9–3.8 milliseconds after warm-up and no longer creates a temporary sort.
+
 ## v0.8.0 - 2026-08-12
 
 ### Faster structured and regex search
