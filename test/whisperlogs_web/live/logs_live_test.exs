@@ -37,6 +37,15 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     end
   end
 
+  defp insert_events(source, events) do
+    events
+    |> Enum.chunk_every(100)
+    |> Enum.flat_map(fn chunk ->
+      {:ok, inserted} = Logs.insert_batch(source, chunk)
+      inserted
+    end)
+  end
+
   # Authentication is enforced identically on both database adapters.
 
   describe "mount and render" do
@@ -241,6 +250,93 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       refute html =~ "Connection timeout error"
       assert html =~ "User login successful"
       assert html =~ "Request processed"
+    end
+  end
+
+  describe "staged navigation" do
+    test "jump to latest paints the first page before hydrating the full window", %{conn: conn} do
+      events = Enum.map(1..150, &%{"message" => "jump hydration log #{&1}"})
+      assert {:ok, _inserted} = Logs.insert_batch("jump-source", events)
+
+      {:ok, lv, _html} = live(conn, ~p"/?t=30d")
+      render_async(lv)
+
+      render_click(lv, "far-from-bottom")
+      assert has_element?(lv, "#jump-to-latest")
+
+      lv
+      |> element("#jump-to-latest")
+      |> render_click()
+
+      assert_push_event(lv, "force-scroll-bottom", %{}, 1_000)
+      render_async(lv)
+
+      [newest | _] = logs = Logs.list_logs(sources: ["jump-source"], limit: 150)
+      oldest = List.last(logs)
+
+      assert has_element?(lv, "#logs-#{newest.id}")
+      assert has_element?(lv, "#logs-#{oldest.id}")
+    end
+
+    test "view in context paints 100 centered rows then hydrates outward", %{conn: conn} do
+      events = Enum.map(1..520, &%{"message" => "context hydration log #{&1}"})
+      assert length(insert_events("context-source", events)) == 520
+
+      ordered_logs = Logs.list_logs(sources: ["context-source"], limit: 520)
+      target = Enum.at(ordered_logs, 260)
+      target_id = Integer.to_string(target.id)
+      hydrated_newer_edge = Enum.at(ordered_logs, 10)
+      hydrated_older_log = Enum.at(ordered_logs, 450)
+
+      {:ok, lv, _html} = live(conn, ~p"/?t=30d")
+      render_async(lv)
+
+      lv
+      |> element("#filters-form")
+      |> render_change(%{"search" => target.message})
+
+      render_async(lv)
+
+      lv
+      |> element("#view-in-context-#{target.id}")
+      |> render_click()
+
+      assert_push_event(lv, "scroll-to-log", %{log_id: ^target_id}, 1_000)
+      render_async(lv)
+
+      assert has_element?(lv, "#logs-#{target.id}")
+      assert has_element?(lv, "#logs-#{hydrated_newer_edge.id}")
+      assert has_element?(lv, "#logs-#{hydrated_older_log.id}")
+    end
+
+    test "scroll to time paints the nearby page then hydrates outward", %{conn: conn} do
+      events = Enum.map(1..320, &%{"message" => "time hydration log #{&1}"})
+      assert length(insert_events("time-source", events)) == 320
+
+      ordered_logs = Logs.list_logs(sources: ["time-source"], limit: 320)
+      target_time = List.last(ordered_logs).inserted_at
+      local_time = DateTime.shift_zone!(target_time, "America/Los_Angeles")
+
+      {:ok, lv, _html} = live(conn, ~p"/?t=30d")
+      render_async(lv)
+
+      lv
+      |> element("#scroll-to-date")
+      |> render_change(%{"scroll_to_date" => Date.to_iso8601(local_time)})
+
+      lv
+      |> element("#scroll-to-time")
+      |> render_change(%{"scroll_to_time" => Calendar.strftime(local_time, "%H:%M:%S")})
+
+      lv
+      |> element("#scroll-to-submit")
+      |> render_click()
+
+      assert_push_event(lv, "scroll-to-log", %{log_id: _log_id}, 1_000)
+      render_async(lv)
+
+      hydrated_log = Enum.at(ordered_logs, 100)
+      assert has_element?(lv, "#logs-#{hydrated_log.id}")
     end
   end
 

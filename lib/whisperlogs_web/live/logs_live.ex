@@ -52,6 +52,7 @@ defmodule WhisperLogsWeb.LogsLive do
      |> assign(:query_generation, 0)
      |> assign(:fetch_task_name, nil)
      |> assign(:backfill_task_name, nil)
+     |> assign(:force_scroll_after_fetch?, false)
      |> assign(:hydrating_logs?, false)
      |> assign(:hydration_logs, [])
      |> assign(:flush_timer_ref, if(connected?(socket), do: schedule_flush(), else: nil))
@@ -210,6 +211,7 @@ defmodule WhisperLogsWeb.LogsLive do
                 <%!-- View in context button - only shows when filters are active --%>
                 <button
                   :if={filters_active?(@filters)}
+                  id={"view-in-context-#{log.id}"}
                   type="button"
                   phx-click="view-in-context"
                   phx-value-id={log.id}
@@ -315,6 +317,7 @@ defmodule WhisperLogsWeb.LogsLive do
         <%!-- Jump to latest button - positioned outside scrollable area --%>
         <button
           :if={@far_from_bottom? or @has_newer?}
+          id="jump-to-latest"
           phx-click="jump-to-latest"
           class="absolute bottom-36 md:bottom-20 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 px-4 py-2 bg-bg-elevated text-purple-400 text-xs font-medium rounded-full shadow-lg hover:bg-bg-surface transition-colors border border-purple-500/30"
         >
@@ -574,6 +577,7 @@ defmodule WhisperLogsWeb.LogsLive do
             <%!-- Scroll to time --%>
             <div class="relative">
               <button
+                id="scroll-to-toggle"
                 type="button"
                 phx-click={JS.toggle(to: "#scroll-to-popover")}
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-smaller font-medium transition-all border bg-bg-surface border-border-default text-text-secondary hover:text-text-primary hover:border-border-subtle"
@@ -604,6 +608,7 @@ defmodule WhisperLogsWeb.LogsLive do
                     class="bg-bg-surface border border-border-default rounded-lg px-2 py-1.5 text-smaller text-text-primary focus:outline-none focus:border-text-tertiary"
                   />
                   <button
+                    id="scroll-to-submit"
                     type="button"
                     phx-click={JS.push("scroll-to-time") |> JS.hide(to: "#scroll-to-popover")}
                     class="px-3 py-1.5 bg-purple-500/10 text-purple-400 rounded-lg text-smaller font-medium hover:bg-purple-500/20 transition-colors border border-purple-500/30"
@@ -1058,28 +1063,7 @@ defmodule WhisperLogsWeb.LogsLive do
     filters = params_to_filters(params)
 
     if connected?(socket) do
-      socket = invalidate_hydration(socket)
-      generation = socket.assigns.query_generation
-      task_name = {:fetch_logs, generation}
-
-      {:noreply,
-       socket
-       |> assign(:filters, filters)
-       |> assign(:loading_logs?, true)
-       |> assign(:fetch_task_name, task_name)
-       |> assign(:hydrating_logs?, true)
-       |> assign(:hydration_logs, [])
-       |> assign(:cursor_top, nil)
-       |> assign(:cursor_bottom, nil)
-       |> assign(:has_older?, false)
-       |> assign(:has_newer?, false)
-       |> assign(:log_buffer, [])
-       |> stream(:logs, [], reset: true)
-       |> start_async(task_name, fn ->
-         opts = filter_opts(filters) |> Keyword.put(:limit, @per_page)
-         page = Logs.list_logs_page(opts)
-         %{logs: Enum.reverse(page.logs), has_older?: page.has_more?}
-       end)}
+      {:noreply, start_logs_hydration(socket, filters)}
     else
       {:noreply, assign(socket, :filters, filters)}
     end
@@ -1089,6 +1073,7 @@ defmodule WhisperLogsWeb.LogsLive do
   def handle_async({:fetch_logs, generation}, {:ok, result}, socket)
       when generation == socket.assigns.query_generation do
     {cursor_top, cursor_bottom} = extract_cursors(result.logs)
+    force_scroll? = socket.assigns.force_scroll_after_fetch?
 
     socket =
       socket
@@ -1101,7 +1086,13 @@ defmodule WhisperLogsWeb.LogsLive do
       |> assign(:has_newer?, false)
       |> assign(:at_bottom?, true)
       |> assign(:far_from_bottom?, false)
+      |> assign(:force_scroll_after_fetch?, false)
       |> stream(:logs, result.logs, reset: true)
+
+    socket =
+      if force_scroll?,
+        do: push_event(socket, "force-scroll-bottom", %{}),
+        else: socket
 
     if result.has_older? and cursor_top != nil do
       task_name = {:backfill_logs, generation}
@@ -1144,8 +1135,77 @@ defmodule WhisperLogsWeb.LogsLive do
      |> finish_hydration([], true)}
   end
 
+  def handle_async({:fetch_context, generation}, {:ok, result}, socket)
+      when generation == socket.assigns.query_generation do
+    if result.page.logs == [] do
+      {:noreply,
+       socket
+       |> assign(:fetch_task_name, nil)
+       |> finish_context_hydration(empty_page(), empty_page())
+       |> put_flash(:info, "No logs found around that time")}
+    else
+      {cursor_top, cursor_bottom} = extract_cursors(result.page.logs)
+
+      socket =
+        socket
+        |> assign(:loading_logs?, false)
+        |> assign(:fetch_task_name, nil)
+        |> assign(:hydration_logs, result.page.logs)
+        |> assign(:cursor_top, cursor_top)
+        |> assign(:cursor_bottom, cursor_bottom)
+        |> assign(:has_older?, false)
+        |> assign(:has_newer?, false)
+        |> stream(:logs, result.page.logs, reset: true)
+        |> push_event("scroll-to-log", %{log_id: result.target_log_id})
+
+      if result.page.has_older? or result.page.has_newer? do
+        task_name = {:backfill_context, generation}
+
+        {:noreply,
+         socket
+         |> assign(:backfill_task_name, task_name)
+         |> start_async(task_name, fn ->
+           context_backfill_pages(
+             cursor_top,
+             cursor_bottom,
+             result.page.has_older?,
+             result.page.has_newer?
+           )
+         end)}
+      else
+        {:noreply, finish_context_hydration(socket, empty_page(), empty_page())}
+      end
+    end
+  end
+
+  def handle_async({:fetch_context, generation}, {:exit, _reason}, socket)
+      when generation == socket.assigns.query_generation do
+    {:noreply,
+     socket
+     |> assign(:loading_logs?, false)
+     |> assign(:fetch_task_name, nil)
+     |> finish_context_hydration(empty_page(), empty_page())
+     |> put_flash(:error, "Could not load this log's context")}
+  end
+
+  def handle_async({:backfill_context, generation}, {:ok, result}, socket)
+      when generation == socket.assigns.query_generation do
+    {:noreply,
+     socket
+     |> assign(:backfill_task_name, nil)
+     |> finish_context_hydration(result.older_page, result.newer_page)}
+  end
+
+  def handle_async({:backfill_context, generation}, {:exit, _reason}, socket)
+      when generation == socket.assigns.query_generation do
+    {:noreply,
+     socket
+     |> assign(:backfill_task_name, nil)
+     |> finish_context_hydration(empty_page(true), empty_page(true))}
+  end
+
   def handle_async({task, _generation}, _result, socket)
-      when task in [:fetch_logs, :backfill_logs] do
+      when task in [:fetch_logs, :backfill_logs, :fetch_context, :backfill_context] do
     {:noreply, socket}
   end
 
@@ -1363,24 +1423,8 @@ defmodule WhisperLogsWeb.LogsLive do
   end
 
   def handle_event("jump-to-latest", _params, socket) do
-    filters = socket.assigns.filters
-    opts = filter_opts(filters) |> Keyword.put(:limit, @max_logs)
-    page = Logs.list_logs_page(opts)
-    logs = Enum.reverse(page.logs)
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-
     {:noreply,
-     socket
-     |> invalidate_hydration()
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, page.has_more?)
-     |> assign(:has_newer?, false)
-     |> assign(:at_bottom?, true)
-     |> assign(:far_from_bottom?, false)
-     |> assign(:log_buffer, [])
-     |> stream(:logs, logs, reset: true)
-     |> push_event("force-scroll-bottom", %{})}
+     start_logs_hydration(socket, socket.assigns.filters, force_scroll_after_fetch?: true)}
   end
 
   def handle_event("scroll-away", _params, socket) do
@@ -1415,25 +1459,8 @@ defmodule WhisperLogsWeb.LogsLive do
 
   def handle_event("view-in-context", %{"id" => id, "timestamp" => timestamp_str}, socket) do
     {:ok, timestamp, _} = DateTime.from_iso8601(timestamp_str)
-    cursor = {timestamp, id}
 
-    filters = default_filters()
-    page = Logs.list_logs_around_page(cursor, limit: @max_logs)
-    logs = page.logs
-    {cursor_top, cursor_bottom} = extract_cursors(logs)
-
-    {:noreply,
-     socket
-     |> invalidate_hydration()
-     |> assign(:filters, filters)
-     |> assign(:cursor_top, cursor_top)
-     |> assign(:cursor_bottom, cursor_bottom)
-     |> assign(:has_older?, page.has_older?)
-     |> assign(:has_newer?, page.has_newer?)
-     |> assign(:at_bottom?, false)
-     |> assign(:log_buffer, [])
-     |> stream(:logs, logs, reset: true)
-     |> push_event("scroll-to-log", %{log_id: id})}
+    {:noreply, start_context_hydration(socket, {timestamp, id}, {:log_id, id})}
   end
 
   @impl true
@@ -1479,11 +1506,99 @@ defmodule WhisperLogsWeb.LogsLive do
     |> assign(:query_generation, socket.assigns.query_generation + 1)
     |> assign(:fetch_task_name, nil)
     |> assign(:backfill_task_name, nil)
+    |> assign(:force_scroll_after_fetch?, false)
     |> assign(:loading_logs?, false)
     |> assign(:hydrating_logs?, false)
     |> assign(:hydration_logs, [])
     |> assign(:log_buffer, [])
   end
+
+  defp start_logs_hydration(socket, filters, opts \\ []) do
+    socket = invalidate_hydration(socket)
+    generation = socket.assigns.query_generation
+    task_name = {:fetch_logs, generation}
+    force_scroll? = Keyword.get(opts, :force_scroll_after_fetch?, false)
+
+    socket
+    |> assign(:filters, filters)
+    |> assign(:loading_logs?, true)
+    |> assign(:fetch_task_name, task_name)
+    |> assign(:force_scroll_after_fetch?, force_scroll?)
+    |> assign(:hydrating_logs?, true)
+    |> assign(:hydration_logs, [])
+    |> assign(:cursor_top, nil)
+    |> assign(:cursor_bottom, nil)
+    |> assign(:has_older?, false)
+    |> assign(:has_newer?, false)
+    |> assign(:at_bottom?, true)
+    |> assign(:far_from_bottom?, false)
+    |> assign(:log_buffer, [])
+    |> stream(:logs, [], reset: true)
+    |> start_async(task_name, fn ->
+      query_opts = filter_opts(filters) |> Keyword.put(:limit, @per_page)
+      page = Logs.list_logs_page(query_opts)
+      %{logs: Enum.reverse(page.logs), has_older?: page.has_more?}
+    end)
+  end
+
+  defp start_context_hydration(socket, cursor, target, opts \\ []) do
+    socket = invalidate_hydration(socket)
+    generation = socket.assigns.query_generation
+    task_name = {:fetch_context, generation}
+    filters = Keyword.get(opts, :filters, default_filters())
+
+    socket
+    |> assign(:filters, filters)
+    |> assign(:loading_logs?, true)
+    |> assign(:fetch_task_name, task_name)
+    |> assign(:hydrating_logs?, true)
+    |> assign(:hydration_logs, [])
+    |> assign(:cursor_top, nil)
+    |> assign(:cursor_bottom, nil)
+    |> assign(:has_older?, false)
+    |> assign(:has_newer?, false)
+    |> assign(:at_bottom?, false)
+    |> assign(:far_from_bottom?, false)
+    |> assign(:log_buffer, [])
+    |> stream(:logs, [], reset: true)
+    |> start_async(task_name, fn ->
+      page = Logs.list_logs_around_page(cursor, limit: @per_page)
+
+      %{
+        page: page,
+        target_log_id: context_target_log_id(page.logs, target)
+      }
+    end)
+  end
+
+  defp context_target_log_id(_logs, {:log_id, id}), do: id
+
+  defp context_target_log_id(logs, {:at_or_after, timestamp}) do
+    target_log =
+      Enum.find(logs, List.first(logs), fn log ->
+        DateTime.compare(log.inserted_at, timestamp) != :lt
+      end)
+
+    if target_log, do: target_log.id
+  end
+
+  defp context_backfill_pages(cursor_top, cursor_bottom, has_older?, has_newer?) do
+    per_side = div(@max_logs - @per_page, 2)
+
+    older_page =
+      if has_older?,
+        do: Logs.list_logs_before_page(cursor_top, limit: per_side),
+        else: empty_page()
+
+    newer_page =
+      if has_newer?,
+        do: Logs.list_logs_after_page(cursor_bottom, limit: per_side),
+        else: empty_page()
+
+    %{older_page: older_page, newer_page: newer_page}
+  end
+
+  defp empty_page(has_more? \\ false), do: %{logs: [], has_more?: has_more?}
 
   defp maybe_cancel_async(socket, nil), do: socket
   defp maybe_cancel_async(socket, task_name), do: cancel_async(socket, task_name)
@@ -1536,6 +1651,27 @@ defmodule WhisperLogsWeb.LogsLive do
     |> stream(:logs, buffered_to_insert, at: -1, limit: -@max_logs)
   end
 
+  defp finish_context_hydration(socket, older_page, newer_page) do
+    initial_logs = socket.assigns.hydration_logs
+
+    visible_logs =
+      ordered_unique_logs(Enum.reverse(older_page.logs) ++ initial_logs ++ newer_page.logs)
+
+    {cursor_top, cursor_bottom} = extract_cursors(visible_logs)
+
+    socket
+    |> assign(:loading_logs?, false)
+    |> assign(:hydrating_logs?, false)
+    |> assign(:hydration_logs, [])
+    |> assign(:log_buffer, [])
+    |> assign(:cursor_top, cursor_top)
+    |> assign(:cursor_bottom, cursor_bottom)
+    |> assign(:has_older?, older_page.has_more?)
+    |> assign(:has_newer?, newer_page.has_more? or socket.assigns.log_buffer != [])
+    |> stream(:logs, older_page.logs, at: 0, limit: @max_logs)
+    |> stream(:logs, newer_page.logs, at: -1, limit: -@max_logs)
+  end
+
   defp ordered_unique_logs(logs) do
     logs
     |> Enum.uniq_by(& &1.id)
@@ -1553,35 +1689,11 @@ defmodule WhisperLogsWeb.LogsLive do
     with {:ok, naive} <- NaiveDateTime.from_iso8601("#{date}T#{time_with_seconds}"),
          local_dt <- DateTime.from_naive!(naive, "America/Los_Angeles"),
          utc_dt <- DateTime.shift_zone!(local_dt, "Etc/UTC") do
-      # Create cursor and fetch logs around that time
       cursor = {utc_dt, 0}
       filters = default_filters() |> Map.put(:time_range, "all")
-      page = Logs.list_logs_around_page(cursor, limit: @max_logs)
-      logs = page.logs
 
-      if logs == [] do
-        {:noreply, socket |> put_flash(:info, "No logs found around that time")}
-      else
-        {cursor_top, cursor_bottom} = extract_cursors(logs)
-
-        # Find the first log at or after the target time
-        target_log =
-          Enum.find(logs, List.first(logs), fn log ->
-            DateTime.compare(log.timestamp, utc_dt) != :lt
-          end)
-
-        {:noreply,
-         socket
-         |> invalidate_hydration()
-         |> assign(:filters, filters)
-         |> assign(:cursor_top, cursor_top)
-         |> assign(:cursor_bottom, cursor_bottom)
-         |> assign(:has_older?, page.has_older?)
-         |> assign(:has_newer?, page.has_newer?)
-         |> assign(:at_bottom?, false)
-         |> stream(:logs, logs, reset: true)
-         |> push_event("scroll-to-log", %{log_id: target_log.id})}
-      end
+      {:noreply,
+       start_context_hydration(socket, cursor, {:at_or_after, utc_dt}, filters: filters)}
     else
       _ ->
         {:noreply, socket |> put_flash(:error, "Invalid date/time format")}

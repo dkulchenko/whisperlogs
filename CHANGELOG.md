@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.8.2 - 2026-08-13
+
+### Faster log navigation
+
+- Make **Jump to latest** use the same staged hydration as initial page loads:
+  paint the newest 100 logs and scroll immediately, then asynchronously hydrate
+  the remaining 400-row buffer.
+- Make filtered-log **View in context** paint 100 rows centered on the selected
+  log before hydrating up to 200 additional rows on each side in the background.
+- Apply the same centered 100-to-500 hydration to the date/time **Scroll to**
+  action and select its target using the observed timestamp that orders the log
+  stream.
+- Preserve live-tail arrivals, stable cursors, and stale-task cancellation while
+  each navigation window is being hydrated.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- Navigation behavior and filters are unchanged; the first useful rows now render
+  before the full 500-row window has been queried and patched into the page.
+
 ## v0.8.1 - 2026-08-13
 
 ### Reliable long-range browsing
