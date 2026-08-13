@@ -30,9 +30,9 @@ when that header is present. Discovery and token endpoints use the unauthenticat
 consent uses the authenticated browser pipeline and its CSRF protection.
 
 For MCP searches, prefer the structured RFC 3339 `since` and `until` arguments for time windows.
-They apply to the producer-supplied event timestamp (`since` inclusive, `until` exclusive) and are
-bound to the opaque pagination cursor along with the query and user. The equivalent advanced query
-syntax remains available, for example `timestamp:>=2026-08-12T00:15:00Z level:error`.
+They apply to trusted server-observed time (`since` inclusive, `until` exclusive) and are bound to
+the opaque pagination cursor along with the query and user. Producer-time filtering remains
+available explicitly, for example `timestamp:>=2026-08-12T00:15:00Z level:error`.
 
 Authorization codes expire after five minutes and require PKCE S256. Access tokens expire after
 one hour. Refresh tokens rotate and expire after 30 days; replay of a consumed refresh token
@@ -58,8 +58,9 @@ to the authorizing user and exact query.
 ## Ingestion and time
 
 `timestamp` is producer-supplied event time. `inserted_at` is trusted server-observed time and
-controls default ordering/pagination, metrics, alert windows/cursors, retention, and scheduled
-exports. Explicit `timestamp:` search and manual export ranges continue to use event time.
+controls default ordering/pagination, structured MCP time bounds, metrics, alert windows/cursors,
+retention, and scheduled exports. Explicit `timestamp:` search and manual export ranges continue
+to use event time.
 `level:` and `source:` search match either the dedicated column or the metadata value. Numeric
 metadata comparisons accept JSON numbers and canonical decimal strings up to 128 bytes; other
 JSON types and malformed values do not match, including under negation.

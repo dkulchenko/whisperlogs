@@ -9,6 +9,7 @@ defmodule WhisperLogs.Logs do
   alias WhisperLogs.Repo
   alias WhisperLogs.Accounts.{Scope, User}
   alias WhisperLogs.Logs.Log
+  alias WhisperLogs.Logs.VolumeRollups
   alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
 
@@ -25,18 +26,24 @@ defmodule WhisperLogs.Logs do
 
     with :ok <- validate_batch_size(logs),
          {:ok, entries} <- validate_events(logs, source, observed_at) do
-      {_count, inserted} =
-        Repo.insert_all(Log, entries,
-          returning: [
-            :id,
-            :timestamp,
-            :level,
-            :message,
-            :metadata,
-            :source,
-            :inserted_at
-          ]
-        )
+      {:ok, inserted} =
+        Repo.transaction(fn ->
+          {_count, inserted} =
+            Repo.insert_all(Log, entries,
+              returning: [
+                :id,
+                :timestamp,
+                :level,
+                :message,
+                :metadata,
+                :source,
+                :inserted_at
+              ]
+            )
+
+          VolumeRollups.increment_batch!(inserted, observed_at)
+          inserted
+        end)
 
       broadcast({:new_logs, inserted})
       {:ok, inserted}
@@ -262,7 +269,7 @@ defmodule WhisperLogs.Logs do
             query =
               Log
               |> maybe_before(before)
-              |> filter_event_time_range(since, until)
+              |> filter_observed_time_range(since, until)
               |> order_by([l], desc: l.inserted_at, desc: l.id)
               |> apply_search_tokens(tokens)
               |> limit(^(limit + 1))
@@ -295,16 +302,16 @@ defmodule WhisperLogs.Logs do
 
   defp valid_timestamp_bounds?(_since, _until), do: false
 
-  defp filter_event_time_range(query, nil, nil), do: query
+  defp filter_observed_time_range(query, nil, nil), do: query
 
-  defp filter_event_time_range(query, %DateTime{} = since, nil),
-    do: where(query, [l], l.timestamp >= ^since)
+  defp filter_observed_time_range(query, %DateTime{} = since, nil),
+    do: where(query, [l], l.inserted_at >= ^since)
 
-  defp filter_event_time_range(query, nil, %DateTime{} = until),
-    do: where(query, [l], l.timestamp < ^until)
+  defp filter_observed_time_range(query, nil, %DateTime{} = until),
+    do: where(query, [l], l.inserted_at < ^until)
 
-  defp filter_event_time_range(query, %DateTime{} = since, %DateTime{} = until) do
-    where(query, [l], l.timestamp >= ^since and l.timestamp < ^until)
+  defp filter_observed_time_range(query, %DateTime{} = since, %DateTime{} = until) do
+    where(query, [l], l.inserted_at >= ^since and l.inserted_at < ^until)
   end
 
   @doc """
@@ -680,17 +687,7 @@ defmodule WhisperLogs.Logs do
   Returns list of `{datetime, count, bytes}` tuples.
   """
   def volume_by_hour(hours \\ 48) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
-    trunc = DbAdapter.trunc_hour()
-    volume_select = DbAdapter.volume_select_hour()
-
-    Log
-    |> where([l], l.inserted_at >= ^cutoff)
-    |> group_by([l], ^trunc)
-    |> select([l], ^volume_select)
-    |> order_by(^[asc: trunc])
-    |> Repo.all()
-    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
+    VolumeRollups.list("hour", hours)
   end
 
   @doc """
@@ -698,17 +695,7 @@ defmodule WhisperLogs.Logs do
   Returns list of `{datetime, count, bytes}` tuples.
   """
   def volume_by_day(days \\ 30) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-days, :day)
-    trunc = DbAdapter.trunc_day()
-    volume_select = DbAdapter.volume_select_day()
-
-    Log
-    |> where([l], l.inserted_at >= ^cutoff)
-    |> group_by([l], ^trunc)
-    |> select([l], ^volume_select)
-    |> order_by(^[asc: trunc])
-    |> Repo.all()
-    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
+    VolumeRollups.list("day", days)
   end
 
   @doc """
@@ -716,17 +703,17 @@ defmodule WhisperLogs.Logs do
   Returns list of `{datetime, count, bytes}` tuples.
   """
   def volume_by_month(months \\ 12) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-months * 30, :day)
-    trunc = DbAdapter.trunc_month()
-    volume_select = DbAdapter.volume_select_month()
+    days = VolumeRollups.list("day", months * 31)
 
-    Log
-    |> where([l], l.inserted_at >= ^cutoff)
-    |> group_by([l], ^trunc)
-    |> select([l], ^volume_select)
-    |> order_by(^[asc: trunc])
-    |> Repo.all()
-    |> Enum.map(fn %{timestamp: ts, count: c, bytes: b} -> {ts, c, b} end)
+    days
+    |> Enum.group_by(fn {datetime, _, _} -> {datetime.year, datetime.month} end)
+    |> Enum.map(fn {{year, month}, rows} ->
+      bucket = DateTime.new!(Date.new!(year, month, 1), ~T[00:00:00], "Etc/UTC")
+      count = Enum.sum(Enum.map(rows, fn {_, value, _} -> value end))
+      bytes = Enum.sum(Enum.map(rows, fn {_, _, value} -> value end))
+      {bucket, count, bytes}
+    end)
+    |> Enum.sort_by(fn {datetime, _, _} -> DateTime.to_unix(datetime) end)
   end
 
   @doc """
@@ -734,21 +721,13 @@ defmodule WhisperLogs.Logs do
   Returns `{count, bytes}` tuple.
   """
   def volume_last_n_hours(hours) do
-    cutoff = DateTime.utc_now() |> DateTime.add(-hours, :hour)
-    volume_select = DbAdapter.volume_select_total()
-
-    result =
-      Log
-      |> where([l], l.inserted_at >= ^cutoff)
-      |> select([l], ^volume_select)
-      |> Repo.one()
-
-    case result do
-      nil -> {0, 0}
-      %{count: nil, bytes: nil} -> {0, 0}
-      %{count: count, bytes: bytes} -> {count, bytes || 0}
-    end
+    VolumeRollups.list("hour", hours)
+    |> Enum.reduce({0, 0}, fn {_, count, bytes}, {count_total, byte_total} ->
+      {count_total + count, byte_total + bytes}
+    end)
   end
+
+  def total_volume, do: VolumeRollups.totals()
 
   @doc """
   Deletes logs older than the given datetime.
@@ -756,9 +735,14 @@ defmodule WhisperLogs.Logs do
   Returns `{count, nil}` where count is the number of deleted logs.
   """
   def delete_before(%DateTime{} = cutoff) do
-    Log
-    |> where([l], l.inserted_at < ^cutoff)
-    |> Repo.delete_all()
+    {:ok, result} =
+      Repo.transaction(fn ->
+        result = Log |> where([l], l.inserted_at < ^cutoff) |> Repo.delete_all()
+        VolumeRollups.reconcile_after_delete!(cutoff)
+        result
+      end)
+
+    result
   end
 
   @doc """

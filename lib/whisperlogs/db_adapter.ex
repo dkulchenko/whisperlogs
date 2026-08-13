@@ -276,7 +276,14 @@ defmodule WhisperLogs.DbAdapter do
   """
   def log_byte_size do
     if sqlite?() do
-      dynamic([l], fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+      dynamic(
+        [l],
+        fragment(
+          "length(CAST(? AS BLOB)) + length(CAST(coalesce(json(?), '{}') AS BLOB))",
+          l.message,
+          l.metadata
+        )
+      )
     else
       dynamic(
         [l],
@@ -376,7 +383,14 @@ defmodule WhisperLogs.DbAdapter do
     if sqlite?() do
       dynamic([l], %{
         count: count(l.id),
-        bytes: sum(fragment("length(?) + length(coalesce(json(?), '{}'))", l.message, l.metadata))
+        bytes:
+          sum(
+            fragment(
+              "length(CAST(? AS BLOB)) + length(CAST(coalesce(json(?), '{}') AS BLOB))",
+              l.message,
+              l.metadata
+            )
+          )
       })
     else
       dynamic([l], %{

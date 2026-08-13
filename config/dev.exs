@@ -16,6 +16,7 @@ config :whisperlogs, WhisperLogs.Repo.SQLite,
   busy_timeout: 5000,
   synchronous: :normal,
   cache_size: -64000,
+  auto_vacuum: :incremental,
   temp_store: :memory
 
 # PostgreSQL config (used when DATABASE_URL is set)

@@ -17,11 +17,16 @@ defmodule WhisperLogs.Retention do
   alias WhisperLogs.Alerts
   alias WhisperLogs.Exports
   alias WhisperLogs.Accounts
+  alias WhisperLogs.DbAdapter
   alias WhisperLogs.OAuth
+  alias WhisperLogs.Repo
 
   @default_retention_days 30
   @history_retention_days 90
   @cleanup_interval :timer.hours(24)
+  @vacuum_interval :timer.minutes(30)
+  @vacuum_min_pages 64
+  @vacuum_max_pages 2_048
 
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -31,13 +36,20 @@ defmodule WhisperLogs.Retention do
   def init(_opts) do
     # Schedule first cleanup shortly after startup
     Process.send_after(self(), :cleanup, :timer.seconds(60))
-    {:ok, %{retention_days: retention_days()}}
+    schedule_vacuum()
+    {:ok, %{retention_days: retention_days(), vacuum_warning_logged?: false}}
   end
 
   @impl true
   def handle_info(:cleanup, state) do
     run_cleanup(state.retention_days)
     schedule_cleanup()
+    {:noreply, state}
+  end
+
+  def handle_info(:incremental_vacuum, state) do
+    state = run_incremental_vacuum(state)
+    schedule_vacuum()
     {:noreply, state}
   end
 
@@ -89,6 +101,65 @@ defmodule WhisperLogs.Retention do
 
   defp schedule_cleanup do
     Process.send_after(self(), :cleanup, @cleanup_interval)
+  end
+
+  defp schedule_vacuum do
+    if DbAdapter.sqlite?() do
+      Process.send_after(self(), :incremental_vacuum, @vacuum_interval)
+    end
+  end
+
+  defp run_incremental_vacuum(state) do
+    if DbAdapter.sqlite?(), do: run_sqlite_incremental_vacuum(state), else: state
+  end
+
+  defp run_sqlite_incremental_vacuum(state) do
+    [[mode]] = Repo.query!("PRAGMA auto_vacuum").rows
+
+    if mode == 2 do
+      [[freelist_before]] = Repo.query!("PRAGMA freelist_count").rows
+
+      if freelist_before > 0 do
+        target = vacuum_page_target(freelist_before)
+        started_at = System.monotonic_time()
+        Repo.query!("PRAGMA incremental_vacuum(#{target})", [], timeout: 5_000)
+        [[freelist_after]] = Repo.query!("PRAGMA freelist_count").rows
+
+        Logger.info(
+          "SQLite incremental vacuum reclaimed #{freelist_before - freelist_after} pages " <>
+            "(#{freelist_before} -> #{freelist_after}) in #{elapsed_ms(started_at)}ms"
+        )
+      end
+
+      %{state | vacuum_warning_logged?: false}
+    else
+      if !state.vacuum_warning_logged? do
+        Logger.warning(
+          "SQLite incremental vacuum is inactive; activate it during maintenance with " <>
+            "PRAGMA auto_vacuum=INCREMENTAL followed by VACUUM"
+        )
+      end
+
+      %{state | vacuum_warning_logged?: true}
+    end
+  rescue
+    error ->
+      Logger.warning("SQLite incremental vacuum skipped: #{Exception.message(error)}")
+      state
+  end
+
+  @doc false
+  def vacuum_page_target(freelist_count) when is_integer(freelist_count) and freelist_count > 0 do
+    target = ceil(freelist_count / 20)
+    freelist_count |> min(max(target, @vacuum_min_pages)) |> min(@vacuum_max_pages)
+  end
+
+  def vacuum_page_target(0), do: 0
+
+  defp elapsed_ms(started_at) do
+    System.monotonic_time()
+    |> Kernel.-(started_at)
+    |> System.convert_time_unit(:native, :millisecond)
   end
 
   @doc """

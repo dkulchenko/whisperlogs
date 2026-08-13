@@ -34,13 +34,11 @@ defmodule WhisperLogsWeb.MetricsLive do
     {:ok, socket}
   end
 
-  # Run only 2 DB queries instead of 6:
-  # 1) daily volume for last 12 months (the expensive length() scan, done once)
-  # 2) hourly volume for last 48h (small dataset, fast)
-  # Everything else is derived in Elixir from these two results.
+  # All database reads use the persisted rollup table; no request scans logs.
   defp load_metrics_data do
     hourly_data = Logs.volume_by_hour(48)
     daily_data = Logs.volume_by_day(365)
+    {total_count, total_bytes} = Logs.total_volume()
 
     # Monthly: roll up daily data in Elixir
     monthly_data =
@@ -53,10 +51,6 @@ defmodule WhisperLogsWeb.MetricsLive do
         {dt, count, bytes}
       end)
       |> Enum.sort_by(fn {dt, _, _} -> DateTime.to_unix(dt) end)
-
-    # Totals: sum all daily data
-    total_count = Enum.sum(Enum.map(daily_data, fn {_, c, _} -> c end))
-    total_bytes = Enum.sum(Enum.map(daily_data, fn {_, _, b} -> b || 0 end))
 
     # Projection: use last 48h of hourly data for velocity estimate
     {projected_30d_count, projected_30d_bytes} =

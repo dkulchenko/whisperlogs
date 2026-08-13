@@ -9,6 +9,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
   alias WhisperLogs.Accounts.{Source, User}
   alias WhisperLogs.Alerts.{Alert, AlertHistory, NotificationChannel}
   alias WhisperLogs.Exports.{ExportDestination, ExportJob}
+  alias WhisperLogs.Logs
   alias WhisperLogs.Logs.{Log, SavedSearch}
   alias WhisperLogs.Repo.{Postgres, SQLite}
   alias WhisperLogs.SQLiteToPostgresMigrator
@@ -70,6 +71,8 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
              )
 
     assert Enum.find(report, &(&1.table == "logs")).target_count == 2
+    assert {2, migrated_bytes} = Logs.total_volume()
+    assert migrated_bytes > 0
 
     user = Postgres.one!(from u in User, where: u.id == 1)
     assert user.email == "admin@example.com"
@@ -167,6 +170,8 @@ defmodule WhisperLogs.SQLiteToPostgresMigratorTest do
     assert logs_report.target_count_before == 1
     assert logs_report.target_count == 3
     assert Postgres.get!(Log, existing_log.id).message == "existing target row"
+    assert {3, migrated_bytes} = Logs.total_volume()
+    assert migrated_bytes > 0
   end
 
   test "requires an existing source file" do

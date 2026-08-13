@@ -11,7 +11,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
   alias WhisperLogs.Accounts.{Bootstrap, Source, User, UserToken}
   alias WhisperLogs.Alerts.{Alert, AlertHistory, NotificationChannel}
   alias WhisperLogs.Exports.{ExportDestination, ExportJob}
-  alias WhisperLogs.Logs.{Log, SavedSearch}
+  alias WhisperLogs.Logs.{Log, SavedSearch, VolumeRollups}
   alias WhisperLogs.OAuth.{AuthorizationCode, Grant, Token}
   alias WhisperLogs.Repo.{Postgres, SQLite}
 
@@ -312,6 +312,7 @@ defmodule WhisperLogs.SQLiteToPostgresMigrator do
             context = Map.put(admin_context, :target_counts_before, target_counts_before)
 
             copy_tables(sqlite_repo, postgres_repo, batch_size, context)
+            VolumeRollups.rebuild!(postgres_repo)
             reset_sequences!(postgres_repo)
             verify_counts!(sqlite_repo, postgres_repo, context)
           end)

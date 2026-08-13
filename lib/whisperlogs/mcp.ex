@@ -26,7 +26,7 @@ defmodule WhisperLogs.MCP do
         }
       },
       "instructions" =>
-        "Search the authenticated user's WhisperLogs workspace with search_logs. Prefer the structured since and until fields for time windows. Use query for terms and filters such as level:error, request_path:\"/checkout\", or timestamp:>=2026-08-12T00:15:00Z. Metadata keys may optionally use a metadata. prefix. Results are newest first; pass next_cursor unchanged to continue.",
+        "Search the authenticated user's WhisperLogs workspace with search_logs. Prefer the structured since and until fields for observed-time windows. Use query for terms and producer-time filters such as level:error, request_path:\"/checkout\", or timestamp:>=2026-08-12T00:15:00Z. Metadata keys may optionally use a metadata. prefix. Results are newest first; pass next_cursor unchanged to continue.",
       "ttlMs" => 300_000,
       "cacheScope" => "private"
     }
@@ -73,7 +73,7 @@ defmodule WhisperLogs.MCP do
       "name" => @tool_name,
       "title" => "Search WhisperLogs",
       "description" =>
-        "Search logs and return a newest-first page. Prefer since/until for RFC 3339 time windows. Query examples: `checkout`, `level:error stripe`, `request_path:\"/checkout\"`, `duration_ms:>100`, and `timestamp:>=2026-08-12T00:15:00Z`. Plain terms search messages and metadata; filters are ANDed. Metadata keys can be written as `request_path` or `metadata.request_path`. An empty or omitted query returns the newest logs.",
+        "Search logs and return a newest-first page. Prefer since/until for observed-time RFC 3339 windows; `timestamp:` explicitly filters producer event time. Query examples: `checkout`, `level:error stripe`, `request_path:\"/checkout\"`, `duration_ms:>100`, and `timestamp:>=2026-08-12T00:15:00Z`. Plain terms search messages and metadata; filters are ANDed. Metadata keys can be written as `request_path` or `metadata.request_path`. An empty or omitted query returns the newest logs.",
       "inputSchema" => %{
         "$schema" => "https://json-schema.org/draft/2020-12/schema",
         "type" => "object",
@@ -89,12 +89,13 @@ defmodule WhisperLogs.MCP do
             "type" => "string",
             "format" => "date-time",
             "description" =>
-              "Inclusive lower bound on the log's producer timestamp, as RFC 3339 (for example 2026-08-12T00:15:00Z). Prefer this over embedding a lower time bound in query."
+              "Inclusive lower bound on when WhisperLogs observed the log, as RFC 3339 (for example 2026-08-12T00:15:00Z). Prefer this over embedding a producer-time bound in query."
           },
           "until" => %{
             "type" => "string",
             "format" => "date-time",
-            "description" => "Exclusive upper bound on the log's producer timestamp, as RFC 3339."
+            "description" =>
+              "Exclusive upper bound on when WhisperLogs observed the log, as RFC 3339."
           },
           "limit" => %{
             "type" => "integer",

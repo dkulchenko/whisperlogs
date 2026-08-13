@@ -222,6 +222,14 @@ defmodule WhisperLogs.RetentionTest do
       days = Retention.retention_days()
       assert days == 30
     end
+
+    test "adaptive vacuum target is five percent within fixed bounds" do
+      assert Retention.vacuum_page_target(0) == 0
+      assert Retention.vacuum_page_target(10) == 10
+      assert Retention.vacuum_page_target(1_000) == 64
+      assert Retention.vacuum_page_target(10_000) == 500
+      assert Retention.vacuum_page_target(500_000) == 2_048
+    end
   end
 
   describe "error handling" do

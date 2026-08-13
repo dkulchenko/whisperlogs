@@ -88,8 +88,9 @@ codex mcp add whisperlogs --url https://logs.example.com/mcp
 codex mcp login whisperlogs
 ```
 
-`search_logs` accepts optional RFC 3339 `since` (inclusive) and `until` (exclusive) fields; prefer
-these structured fields for time windows. Its optional `query` field supports terms and ANDed
+`search_logs` accepts optional RFC 3339 `since` (inclusive) and `until` (exclusive) fields against
+trusted server-observed time; prefer these structured fields for time windows. Its optional
+`query` field supports terms and ANDed
 filters such as `level:error stripe`, `request_path:"/checkout"`, and
 `timestamp:>=2026-08-12T00:15:00Z`. Metadata keys can also use the explicit
 `metadata.request_path:/checkout` form.
@@ -309,6 +310,20 @@ that already has application rows.
 | `WHISPERLOGS_MCP_QUERY_TIMEOUT_MS` | `5000` | Maximum database time for one MCP log search |
 | `WHISPERLOGS_MCP_MAX_RESPONSE_BYTES` | `1048576` | Maximum MCP tool-result size, including the compatibility text copy |
 | `WHISPERLOGS_MCP_MAX_QUERY_BYTES` | `4096` | Maximum UTF-8 byte length of an MCP search query |
+
+### SQLite incremental vacuum
+
+New SQLite databases use incremental auto-vacuum. Existing databases must be activated once during
+a maintenance window; WhisperLogs deliberately never runs the required full `VACUUM` at startup.
+Stop the application, make a restorable backup of the database plus any WAL/SHM files, verify free
+disk space, and run:
+
+```bash
+sqlite3 "$DATABASE_PATH" 'PRAGMA auto_vacuum=INCREMENTAL; VACUUM;'
+```
+
+After activation, WhisperLogs checks the freelist every 30 minutes and reclaims 5% of queued free
+pages, bounded to 64–2,048 pages per pass. Busy attempts are skipped and retried on the next tick.
 
 See [the security and operations reference](docs/security-and-operations.md) for all validated
 limits, time semantics, ownership rules, export/S3 behavior, and shipper retry policy. See

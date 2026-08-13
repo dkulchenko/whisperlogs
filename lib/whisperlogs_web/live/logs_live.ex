@@ -9,6 +9,7 @@ defmodule WhisperLogsWeb.LogsLive do
   @max_logs @per_page * 5
   @flush_interval_ms 150
   @max_buffer_size 200
+  @all_levels ~w(debug info warning error)
 
   @impl true
   def mount(_params, _session, socket) do
@@ -105,7 +106,7 @@ defmodule WhisperLogsWeb.LogsLive do
       end
 
     opts =
-      if filters.levels != [] do
+      if filters.levels != [] and Enum.sort(filters.levels) != Enum.sort(@all_levels) do
         Keyword.put(opts, :levels, filters.levels)
       else
         opts
@@ -1462,7 +1463,7 @@ defmodule WhisperLogsWeb.LogsLive do
     %{
       search: "",
       source: "",
-      levels: ~w(debug info warning error),
+      levels: @all_levels,
       time_range: "3h"
     }
   end

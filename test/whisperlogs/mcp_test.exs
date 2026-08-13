@@ -74,6 +74,16 @@ defmodule WhisperLogs.MCPTest do
         metadata: %{"request_path" => "/checkout"}
       )
 
+    Repo.update_all(
+      from(l in WhisperLogs.Logs.Log, where: l.id == ^old.id),
+      set: [inserted_at: ~U[2026-08-12 01:30:00.000000Z]]
+    )
+
+    Repo.update_all(
+      from(l in WhisperLogs.Logs.Log, where: l.id == ^recent.id),
+      set: [inserted_at: ~U[2026-08-12 00:00:00.000000Z]]
+    )
+
     assert {:ok, query_result} =
              MCP.call(scope, "search_logs", %{
                "query" => "timestamp:>=2026-08-12T00:15:00Z metadata.request_path:/checkout"
@@ -89,7 +99,8 @@ defmodule WhisperLogs.MCPTest do
                "until" => "2026-08-12T02:00:00Z"
              })
 
-    assert [%{"id" => ^recent_id}] = structured_result["structuredContent"]["logs"]
+    assert [%{"id" => old_id}] = structured_result["structuredContent"]["logs"]
+    assert old_id == old.id
   end
 
   test "validates structured time bounds and binds them to cursors" do
