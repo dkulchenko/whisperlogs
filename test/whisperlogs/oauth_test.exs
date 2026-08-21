@@ -23,6 +23,42 @@ defmodule WhisperLogs.OAuthTest do
     assert {:error, :invalid_client} = Client.resolve("https://127.0.0.1/client.json")
   end
 
+  test "loopback redirect URI matching permits only the ephemeral port to change" do
+    client = %{
+      redirect_uris: [
+        "http://127.0.0.1/callback/codex?source=mcp",
+        "http://[::1]/callback/codex",
+        "https://client.example/callback"
+      ]
+    }
+
+    assert Client.redirect_uri_allowed?(
+             client,
+             "http://127.0.0.1:49152/callback/codex?source=mcp"
+           )
+
+    assert Client.redirect_uri_allowed?(client, "http://[::1]:49153/callback/codex")
+    assert Client.redirect_uri_allowed?(client, "https://client.example/callback")
+
+    refute Client.redirect_uri_allowed?(
+             client,
+             "http://localhost:49152/callback/codex?source=mcp"
+           )
+
+    refute Client.redirect_uri_allowed?(
+             client,
+             "http://127.0.0.1:49152/callback/other?source=mcp"
+           )
+
+    refute Client.redirect_uri_allowed?(client, "http://127.0.0.1:49152/callback/codex")
+    refute Client.redirect_uri_allowed?(client, "https://client.example:49152/callback")
+
+    refute Client.redirect_uri_allowed?(
+             client,
+             "http://127.0.0.1:not-a-port/callback/codex?source=mcp"
+           )
+  end
+
   test "authorization codes require exact PKCE, client, redirect, and resource values" do
     user = user_fixture()
     client = oauth_client_fixture()

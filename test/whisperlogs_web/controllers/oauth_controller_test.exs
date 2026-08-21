@@ -59,6 +59,32 @@ defmodule WhisperLogsWeb.OAuthControllerTest do
     assert html_response(conn, 200) =~ ~s(id="oauth-consent-form")
   end
 
+  test "renders consent when a loopback client selects an ephemeral callback port", %{conn: conn} do
+    client =
+      oauth_client_fixture(%{
+        "redirect_uris" => ["http://127.0.0.1/callback/codex-client"]
+      })
+
+    verifier = String.duplicate("p", 64)
+    challenge = :crypto.hash(:sha256, verifier) |> Base.url_encode64(padding: false)
+
+    path =
+      "/oauth/authorize?" <>
+        URI.encode_query(%{
+          "response_type" => "code",
+          "client_id" => client.client_id,
+          "redirect_uri" => "http://127.0.0.1:49152/callback/codex-client",
+          "code_challenge" => challenge,
+          "code_challenge_method" => "S256",
+          "scope" => OAuth.scope(),
+          "resource" => OAuth.resource(),
+          "state" => "state"
+        })
+
+    conn = conn |> log_in_user(user_fixture()) |> get(path)
+    assert html_response(conn, 200) =~ ~s(id="oauth-consent-form")
+  end
+
   test "approves consent and exchanges the one-use code", %{conn: conn} do
     user = user_fixture()
     client = oauth_client_fixture()

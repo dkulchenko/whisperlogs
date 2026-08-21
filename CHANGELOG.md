@@ -1,5 +1,25 @@
 # Changelog
 
+## v0.8.3 - 2026-08-20
+
+### Reliable Codex MCP connections
+
+- Accept the ephemeral port selected by Codex for CIMD loopback OAuth callbacks
+  while continuing to require the registered scheme, host, path, query,
+  userinfo, and fragment to match exactly.
+- Keep exact redirect URI matching for non-loopback HTTPS clients and reject
+  malformed or out-of-range callback ports.
+- Add focused OAuth and controller coverage for permitted IPv4 and IPv6
+  loopback ports and rejected callback mutations.
+- Ignore project-local `.codex` configuration and skills so developer-specific
+  automation stays outside version control.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- Existing DCR-based MCP connections are unchanged. Current Codex clients can
+  use automatic CIMD registration without forcing the DCR fallback.
+
 ## v0.8.2 - 2026-08-13
 
 ### Faster log navigation

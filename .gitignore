@@ -35,10 +35,12 @@ whisperlogs-*.tar
 npm-debug.log
 /assets/node_modules/
 
+# Project-local Codex configuration and skills
+/.codex/
+
 # Burrito build output
 /burrito_out/
 
 # Development and test databases (SQLite)
 /priv/*.db
 /priv/*.db-*
-

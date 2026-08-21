@@ -59,7 +59,7 @@ defmodule WhisperLogsWeb.OAuthAuthorizationController do
          {:ok, resource} <- required(params, "resource"),
          true <- resource == OAuth.resource(),
          {:ok, client} <- Client.resolve(client_id),
-         true <- redirect_uri in client.redirect_uris,
+         true <- Client.redirect_uri_allowed?(client, redirect_uri),
          {:ok, state} <- optional_state(params) do
       {:ok,
        %{

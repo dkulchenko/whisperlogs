@@ -8,6 +8,7 @@ defmodule WhisperLogs.OAuth.Client do
   @max_document_bytes 65_536
   @max_client_id_bytes 4_096
   @max_redirect_uri_bytes 2_048
+  @loopback_hosts ["localhost", "127.0.0.1", "::1"]
 
   @type t :: %{
           client_id: String.t(),
@@ -55,13 +56,13 @@ defmodule WhisperLogs.OAuth.Client do
 
   def valid_redirect_uri?(redirect_uri) when is_binary(redirect_uri) do
     byte_size(redirect_uri) <= @max_redirect_uri_bytes and
-      case URI.parse(redirect_uri) do
-        %URI{scheme: "https", host: host, userinfo: nil, fragment: nil}
-        when is_binary(host) and host != "" ->
+      case URI.new(redirect_uri) do
+        {:ok, %URI{scheme: "https", host: host, port: port, userinfo: nil, fragment: nil}}
+        when is_binary(host) and host != "" and port in 1..65_535 ->
           true
 
-        %URI{scheme: "http", host: host, userinfo: nil, fragment: nil}
-        when host in ["localhost", "127.0.0.1", "[::1]", "::1"] ->
+        {:ok, %URI{scheme: "http", host: host, port: port, userinfo: nil, fragment: nil}}
+        when host in @loopback_hosts and port in 1..65_535 ->
           true
 
         _ ->
@@ -71,6 +72,15 @@ defmodule WhisperLogs.OAuth.Client do
 
   def valid_redirect_uri?(_redirect_uri), do: false
 
+  def redirect_uri_allowed?(%{redirect_uris: redirect_uris}, redirect_uri)
+      when is_list(redirect_uris) and is_binary(redirect_uri) do
+    redirect_uri in redirect_uris or
+      (valid_redirect_uri?(redirect_uri) and
+         Enum.any?(redirect_uris, &loopback_redirect_uri_match?(&1, redirect_uri)))
+  end
+
+  def redirect_uri_allowed?(_client, _redirect_uri), do: false
+
   defp validate_cimd_uri(client_id) do
     case URI.parse(client_id) do
       %URI{scheme: "https", host: host, path: path, userinfo: nil, fragment: nil} = uri
@@ -79,6 +89,22 @@ defmodule WhisperLogs.OAuth.Client do
 
       _ ->
         {:error, :invalid_client_id_uri}
+    end
+  end
+
+  defp loopback_redirect_uri_match?(registered_redirect_uri, requested_redirect_uri) do
+    with {:ok, registered} <- URI.new(registered_redirect_uri),
+         {:ok, requested} <- URI.new(requested_redirect_uri) do
+      registered.scheme == "http" and
+        requested.scheme == registered.scheme and
+        registered.host in @loopback_hosts and
+        requested.host == registered.host and
+        requested.userinfo == registered.userinfo and
+        requested.path == registered.path and
+        requested.query == registered.query and
+        requested.fragment == registered.fragment
+    else
+      _ -> false
     end
   end
 
