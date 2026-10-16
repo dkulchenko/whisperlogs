@@ -116,6 +116,10 @@ defmodule WhisperLogs.Logs do
 
   defp event_level(nil), do: {:ok, "info"}
   defp event_level("warn"), do: {:ok, "warning"}
+  # Elixir Logger and syslog severities beyond the four stored levels map the
+  # same way the syslog parser maps them.
+  defp event_level("notice"), do: {:ok, "info"}
+  defp event_level(level) when level in ~w(critical alert emergency), do: {:ok, "error"}
   defp event_level(level) when level in ~w(debug info warning error), do: {:ok, level}
 
   defp event_level(level) when is_binary(level),

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.4 - 2026-10-16
+
+### Accept every Logger level over HTTP
+
+- Store `notice` events as `info`, and `critical`, `alert`, and `emergency`
+  events as `error`, matching how syslog ingestion already maps those
+  severities. Elixir's Logger and OTP emit these levels, for example
+  `notice` for "SIGTERM received", and a single such event previously made
+  the whole batch fail with HTTP 422.
+- Document the accepted level aliases in the ingestion API reference.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- Levels other than these aliases and `debug`, `info`, `warning`, and `error`
+  are still rejected.
+
 ## v0.8.3 - 2026-08-20
 
 ### Reliable Codex MCP connections

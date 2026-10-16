@@ -335,6 +335,18 @@ defmodule WhisperLogs.LogsTest do
       assert log.timestamp == log.inserted_at
     end
 
+    test "maps the remaining Logger severities onto the stored levels" do
+      assert {:ok, logs} =
+               Logs.insert_batch("api", [
+                 %{"level" => "notice"},
+                 %{"level" => "critical"},
+                 %{"level" => "alert"},
+                 %{"level" => "emergency"}
+               ])
+
+      assert Enum.map(logs, & &1.level) == ["info", "error", "error", "error"]
+    end
+
     test "measures UTF-8 bytes, metadata depth, and the merged request id" do
       with_receiver_limits(
         %{
