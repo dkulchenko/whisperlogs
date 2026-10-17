@@ -26,7 +26,7 @@ defmodule WhisperLogs.Shipper.MixProject do
 
   defp deps do
     [
-      {:req, "~> 0.7.2"},
+      {:req, "~> 0.7.5"},
       {:jason, "~> 1.4.5"},
       # Dev/test
       {:bypass, "~> 2.1", only: :test}

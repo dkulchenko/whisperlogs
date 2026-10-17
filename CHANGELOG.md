@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.5 - 2026-10-17
+
+### Security and dependency updates
+
+- Upgrade Bandit to 1.13.1, fixing CVE-2026-105659 (HIGH), where a trickle
+  of HTTP/2 `WINDOW_UPDATE` frames could pin stream processes indefinitely,
+  and CVE-2026-105660 (MEDIUM), where an HTTP/1 request-target authority
+  could set `conn.host` and `conn.port`.
+- Upgrade Phoenix to 1.8.15, Phoenix LiveView to 1.2.12, and Phoenix
+  LiveDashboard to 0.9.1. The LiveView releases include the fix for the open
+  redirect in `redirect/2` (CVE-2026-64941).
+- Upgrade Postgrex to 0.22.4 (CVE-2026-66838), ecto_sqlite3 to 0.25.0 with
+  exqlite 0.42.0, Req to 0.7.5, Swoosh to 1.29.0, Telemetry Metrics to 1.2.0,
+  and tz to 0.28.4 with tzdata 2026d. The log shipper package also moves to
+  Req 0.7.5.
+- Build the Docker image and Burrito binaries on Elixir 1.20.4 and Erlang/OTP
+  29.1.2. The runtime image moves to Debian trixie-20261005, and esbuild moves
+  to 0.28.2.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.4 - 2026-10-16
 
 ### Accept every Logger level over HTTP

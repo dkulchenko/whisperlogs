@@ -4,7 +4,7 @@ defmodule WhisperLogs.MixProject do
   def project do
     [
       app: :whisperlogs,
-      version: "0.8.4",
+      version: "0.8.5",
       elixir: "~> 1.17",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
@@ -66,17 +66,16 @@ defmodule WhisperLogs.MixProject do
   defp deps do
     [
       {:bcrypt_elixir, "~> 3.0"},
-      {:phoenix, "~> 1.8.9"},
+      {:phoenix, "~> 1.8.15"},
       {:phoenix_ecto, "~> 4.5"},
       {:ecto_sql, "~> 3.14"},
-      # Postgrex 0.22.4 is under the seven-day dependency quarantine.
-      {:postgrex, "~> 0.22.3 and < 0.22.4"},
-      {:ecto_sqlite3, "~> 0.24.1"},
+      {:postgrex, "~> 0.22.4"},
+      {:ecto_sqlite3, "~> 0.25.0"},
       {:phoenix_html, "~> 4.1"},
       {:phoenix_live_reload, "~> 1.7", only: :dev},
-      {:phoenix_live_view, "~> 1.2.8"},
-      {:lazy_html, "~> 0.1.12", only: :test},
-      {:phoenix_live_dashboard, "~> 0.8.3"},
+      {:phoenix_live_view, "~> 1.2.12"},
+      {:lazy_html, "~> 0.1.13", only: :test},
+      {:phoenix_live_dashboard, "~> 0.9.1"},
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.5.1", runtime: Mix.env() == :dev},
       {:heroicons,
@@ -86,13 +85,13 @@ defmodule WhisperLogs.MixProject do
        app: false,
        compile: false,
        depth: 1},
-      {:swoosh, "~> 1.27"},
-      {:req, "~> 0.7.2"},
-      {:telemetry_metrics, "~> 1.0"},
+      {:swoosh, "~> 1.29"},
+      {:req, "~> 0.7.5"},
+      {:telemetry_metrics, "~> 1.2"},
       {:telemetry_poller, "~> 1.0"},
       {:jason, "~> 1.4.5"},
-      {:bandit, "~> 1.12.4"},
-      {:tz, "~> 0.28.2"},
+      {:bandit, "~> 1.13.1"},
+      {:tz, "~> 0.28.4"},
       {:date_time_parser, "~> 1.2"},
       {:burrito, "~> 1.6"}
     ]
