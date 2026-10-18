@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.8.6 - 2026-10-17
+
+### Standalone binaries for the v0.8.5 security fixes
+
+- Build the Burrito binaries on Erlang/OTP 29.1, the newest release with a
+  prebuilt runtime available to Burrito. The v0.8.5 binary build failed
+  because none exists yet for OTP 29.1.2, so v0.8.5 shipped only as a Docker
+  image. This release brings its Bandit 1.13.1 security fixes and dependency
+  updates to the standalone binaries.
+- The Docker image continues to build on Erlang/OTP 29.1.2.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- Docker users already on v0.8.5 gain nothing from this release beyond the
+  version number.
+
 ## v0.8.5 - 2026-10-17
 
 ### Security and dependency updates
