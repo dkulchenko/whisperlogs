@@ -1,0 +1,48 @@
+name: Scan for vulnerabilities
+
+# Daily scan for High and Critical vulnerabilities that can be fixed now: it
+# fails only when an update would remove one, and the job summary names each
+# fix. .github/scripts/scan-actionable.sh says what it checks; npm packages and
+# GitHub Actions are left to Dependabot alerts. Grype's database is rebuilt
+# daily, so scanning more often finds nothing new.
+on:
+  schedule:
+    - cron: "37 13 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  GRYPE_VERSION: 0.121.0
+  GRYPE_SHA256: 64e07133d3486115de647a66581461dccf5c732748a0a3119077395565f15519
+  CRANE_VERSION: 0.22.1
+  CRANE_SHA256: 0ab7a1d6932a213aed964ce97666c3077fe691c8606413674a8b3e0b9ec4cda0
+  GRYPE_CHECK_FOR_APP_UPDATE: "false"
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # The full history reads the Dockerfile the newest release was built from.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      # Pinned releases verified by checksum, not actions on movable tags.
+      - name: Install Grype and crane
+        run: |
+          curl -fsSLo grype.tar.gz "https://github.com/anchore/grype/releases/download/v${GRYPE_VERSION}/grype_${GRYPE_VERSION}_linux_amd64.tar.gz"
+          echo "${GRYPE_SHA256}  grype.tar.gz" | sha256sum -c -
+          curl -fsSLo crane.tar.gz "https://github.com/google/go-containerregistry/releases/download/v${CRANE_VERSION}/go-containerregistry_Linux_x86_64.tar.gz"
+          echo "${CRANE_SHA256}  crane.tar.gz" | sha256sum -c -
+          tar -xzf grype.tar.gz grype
+          tar -xzf crane.tar.gz crane
+          sudo install grype crane /usr/local/bin/
+          rm grype grype.tar.gz crane crane.tar.gz
+
+      - name: Scan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/scan-actionable.sh
