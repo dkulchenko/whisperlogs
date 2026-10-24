@@ -8,6 +8,7 @@ defmodule WhisperLogs.OAuth do
   import Ecto.Query, warn: false
 
   alias WhisperLogs.Accounts.{Scope, User}
+  alias WhisperLogs.DbAdapter
   alias WhisperLogs.OAuth.{AuthorizationCode, Grant, Token}
   alias WhisperLogs.Repo
 
@@ -53,7 +54,7 @@ defmodule WhisperLogs.OAuth do
     now = DateTime.utc_now(:microsecond)
     client_key_hash = client_key_hash(request.client_id, request.redirect_uri)
 
-    Repo.transaction(fn ->
+    DbAdapter.write_transaction(fn ->
       grant =
         Grant
         |> where(
@@ -85,7 +86,7 @@ defmodule WhisperLogs.OAuth do
     now = DateTime.utc_now(:microsecond)
     code_hash = hash(code)
 
-    Repo.transaction(fn ->
+    DbAdapter.write_transaction(fn ->
       code =
         AuthorizationCode
         |> where([c], c.token_hash == ^code_hash)
@@ -113,7 +114,7 @@ defmodule WhisperLogs.OAuth do
     now = DateTime.utc_now(:microsecond)
     refresh_hash = hash(refresh_token)
 
-    Repo.transaction(fn ->
+    DbAdapter.write_transaction(fn ->
       token =
         Token
         |> where([t], t.refresh_token_hash == ^refresh_hash)

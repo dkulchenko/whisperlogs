@@ -44,13 +44,29 @@ defmodule WhisperLogs.DbAdapter do
   def serialized_transaction(namespace, fun)
       when is_map_key(@serialized_namespaces, namespace) and is_function(fun, 0) do
     if sqlite?() do
-      WhisperLogs.Repo.transaction(fun, mode: :immediate)
+      write_transaction(fun)
     else
       WhisperLogs.Repo.transaction(fn ->
         lock = Map.fetch!(@serialized_namespaces, namespace)
         WhisperLogs.Repo.query!("SELECT pg_advisory_xact_lock($1)", [lock])
         fun.()
       end)
+    end
+  end
+
+  @doc """
+  Runs a transaction that reads rows and then writes based on them.
+
+  SQLite starts a deferred transaction as a reader. If another connection commits
+  before the reader's first write, SQLite fails that write with "Database busy"
+  immediately, without waiting for `busy_timeout`. An immediate transaction takes
+  the writer reservation up front, so it waits for concurrent writers instead.
+  """
+  def write_transaction(fun) when is_function(fun, 0) do
+    if sqlite?() do
+      WhisperLogs.Repo.transaction(fun, mode: :immediate)
+    else
+      WhisperLogs.Repo.transaction(fun)
     end
   end
 

@@ -44,6 +44,32 @@ defmodule WhisperLogs.Logs.VolumeRollupsTest do
     assert Logs.total_volume() == raw_totals()
   end
 
+  test "retention deletes a backlog larger than one delete batch" do
+    recent = log_fixture("api", message: "recent")
+    old_time = DateTime.add(DateTime.utc_now(), -60, :day) |> DateTime.truncate(:microsecond)
+
+    old_logs =
+      for i <- 1..1_001 do
+        %{
+          message: "old #{i}",
+          timestamp: old_time,
+          level: "info",
+          metadata: %{},
+          source: "api",
+          inserted_at: old_time
+        }
+      end
+
+    Repo.insert_all(Log, old_logs)
+    VolumeRollups.rebuild!()
+
+    cutoff = DateTime.add(DateTime.utc_now(), -30, :day)
+    assert {1_001, nil} = Logs.delete_before(cutoff)
+    assert Logs.count_logs() == 1
+    assert Logs.get_log(recent.id) != nil
+    assert Logs.total_volume() == raw_totals()
+  end
+
   if DbAdapter.sqlite?() do
     test "SQLite query plans use observed-time indexes" do
       default_plan =

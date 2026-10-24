@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.7 - 2026-10-24
+
+### Reliable SQLite writes under concurrent ingestion
+
+- Retention now deletes expired logs in batches of 1,000, each in its own
+  short transaction. Before, a single `DELETE` held SQLite's writer lock
+  until the 15-second connection timeout interrupted it. Each failed run
+  rolled back without deleting anything, ingestion requests during it failed
+  with HTTP 500 "Database busy", and the backlog grew every day.
+- OAuth authorization, code exchange, and token refresh now start immediate
+  transactions on SQLite. These transactions read before writing, and when
+  ingestion committed between the read and the write, SQLite failed the write
+  with "Database busy" at once without waiting for `busy_timeout`. A failed
+  refresh returned HTTP 500 and left MCP clients disconnected until they
+  re-authorized.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- If retention has been failing, the first cleanup after upgrading (about a
+  minute after startup) deletes the whole backlog in batches. Incremental
+  vacuum then returns the freed pages to the filesystem gradually.
+
 ## v0.8.6 - 2026-10-17
 
 ### Standalone binaries for the v0.8.5 security fixes

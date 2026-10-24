@@ -25,9 +25,7 @@ defmodule WhisperLogs.Accounts.Bootstrap do
   end
 
   def run(opts \\ []) do
-    transaction_opts = if WhisperLogs.DbAdapter.sqlite?(), do: [mode: :immediate], else: []
-
-    case Repo.transaction(fn -> bootstrap_locked(opts) end, transaction_opts) do
+    case WhisperLogs.DbAdapter.write_transaction(fn -> bootstrap_locked(opts) end) do
       {:ok, :ok} -> :ok
       {:error, reason} -> {:error, reason}
     end

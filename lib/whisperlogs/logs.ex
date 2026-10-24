@@ -16,6 +16,9 @@ defmodule WhisperLogs.Logs do
 
   @pubsub WhisperLogs.PubSub
   @topic "logs"
+  @delete_batch_size 1_000
+  # Waiting SQLite writers retry the lock with backoff; a pause between batches lets them in.
+  @delete_batch_pause_ms 50
 
   @doc """
   Inserts a batch of logs for a given source.
@@ -767,17 +770,31 @@ defmodule WhisperLogs.Logs do
   @doc """
   Deletes logs older than the given datetime.
 
+  Deletes in small batches, each in its own transaction, so a large backlog never
+  holds SQLite's single writer lock long enough to block ingestion or exceed the
+  connection timeout. A failure leaves earlier batches deleted and the volume
+  rollups overcounted until the next successful run reconciles them.
+
   Returns `{count, nil}` where count is the number of deleted logs.
   """
   def delete_before(%DateTime{} = cutoff) do
-    {:ok, result} =
-      Repo.transaction(fn ->
-        result = Log |> where([l], l.inserted_at < ^cutoff) |> Repo.delete_all()
-        VolumeRollups.reconcile_after_delete!(cutoff)
-        result
-      end)
+    count = delete_batches_before(cutoff, 0)
+    {:ok, :ok} = Repo.transaction(fn -> VolumeRollups.reconcile_after_delete!(cutoff) end)
+    {count, nil}
+  end
 
-    result
+  defp delete_batches_before(cutoff, deleted) do
+    batch =
+      from(l in Log, where: l.inserted_at < ^cutoff, select: l.id, limit: @delete_batch_size)
+
+    case Repo.delete_all(from(l in Log, where: l.id in subquery(batch))) do
+      {@delete_batch_size, _} ->
+        Process.sleep(@delete_batch_pause_ms)
+        delete_batches_before(cutoff, deleted + @delete_batch_size)
+
+      {count, _} ->
+        deleted + count
+    end
   end
 
   @doc """
