@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.8.8 - 2026-10-24
+
+### Release builds for the v0.8.7 SQLite fixes
+
+- Upgrade the tailwind installer to 0.5.2. GitHub's release-download
+  redirect now sends response headers larger than Erlang `:httpc` accepts by
+  default, so `mix assets.setup` failed with `{:header_too_long, {:max,
+  10240}}`. That broke both the v0.8.7 Docker image and the standalone
+  binaries, and this release is the first to ship the v0.8.7 fixes.
+- Upgrade plug_crypto to 2.2.1, fixing CVE-2026-105963 (MEDIUM), where calling
+  Plug.Crypto with wrongly typed arguments could write the secret key base to
+  logs in a stack trace.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- The v0.8.7 upgrade notes apply when upgrading from v0.8.6 or earlier.
+
 ## v0.8.7 - 2026-10-24
 
 ### Reliable SQLite writes under concurrent ingestion
