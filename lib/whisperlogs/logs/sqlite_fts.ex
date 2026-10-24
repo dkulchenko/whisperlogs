@@ -6,6 +6,7 @@ defmodule WhisperLogs.Logs.SqliteFts do
   require Logger
 
   alias WhisperLogs.DbAdapter
+  alias WhisperLogs.Logs.SqliteFtsPartitions
   alias WhisperLogs.Logs.VolumeRollups
   alias WhisperLogs.Repo
 
@@ -15,8 +16,12 @@ defmodule WhisperLogs.Logs.SqliteFts do
 
   def maybe_prefilter(query, tokens, from, to) do
     case strategy(tokens, from, to) do
-      {:fts, match_query} ->
-        apply_prefilter(query, match_query, from, to)
+      {:fts, candidate_ids} ->
+        where(
+          query,
+          [l],
+          fragment("? IN (SELECT value FROM json_each(?))", l.id, ^Jason.encode!(candidate_ids))
+        )
 
       :scan ->
         query
@@ -28,8 +33,8 @@ defmodule WhisperLogs.Logs.SqliteFts do
          {:ok, match_query} <- match_query(tokens),
          estimated when estimated > @ordered_scan_limit <-
            VolumeRollups.estimated_count(from, to),
-         count when count <= @candidate_cap <- candidate_count(match_query, from, to) do
-      {:fts, match_query}
+         ids when length(ids) <= @candidate_cap <- candidate_ids(match_query, from, to) do
+      {:fts, ids}
     else
       _reason -> :scan
     end
@@ -42,84 +47,36 @@ defmodule WhisperLogs.Logs.SqliteFts do
       :scan
   end
 
-  defp apply_prefilter(query, match_query, nil, nil) do
-    where(
-      query,
-      [l],
-      fragment(
-        "? IN (SELECT rowid FROM logs_fts WHERE logs_fts MATCH ?)",
-        l.id,
-        ^match_query
-      )
-    )
-  end
-
-  defp apply_prefilter(query, match_query, %DateTime{} = from, nil) do
-    where(
-      query,
-      [l],
-      fragment(
-        "? IN (SELECT logs_fts.rowid FROM logs_fts JOIN logs AS fts_logs ON fts_logs.id = logs_fts.rowid WHERE logs_fts MATCH ? AND fts_logs.inserted_at >= ?)",
-        l.id,
-        ^match_query,
-        ^from
-      )
-    )
-  end
-
-  defp apply_prefilter(query, match_query, nil, %DateTime{} = to) do
-    where(
-      query,
-      [l],
-      fragment(
-        "? IN (SELECT logs_fts.rowid FROM logs_fts JOIN logs AS fts_logs ON fts_logs.id = logs_fts.rowid WHERE logs_fts MATCH ? AND fts_logs.inserted_at <= ?)",
-        l.id,
-        ^match_query,
-        ^to
-      )
-    )
-  end
-
-  defp apply_prefilter(query, match_query, %DateTime{} = from, %DateTime{} = to) do
-    where(
-      query,
-      [l],
-      fragment(
-        "? IN (SELECT logs_fts.rowid FROM logs_fts JOIN logs AS fts_logs ON fts_logs.id = logs_fts.rowid WHERE logs_fts MATCH ? AND fts_logs.inserted_at >= ? AND fts_logs.inserted_at <= ?)",
-        l.id,
-        ^match_query,
-        ^from,
-        ^to
-      )
-    )
-  end
-
-  defp candidate_count(match_query, from, to) do
+  # Returns up to one more candidate than the cap, so strategy/3 can tell when to scan instead.
+  defp candidate_ids(match_query, from, to) do
     {time_sql, time_params} = candidate_time_filter(from, to)
+    partitions = SqliteFtsPartitions.table_names()
 
-    %{rows: [[count]]} =
+    union =
+      Enum.map_join(partitions, " UNION ALL ", fn table ->
+        "SELECT rowid AS id FROM #{table} WHERE #{table} MATCH ?"
+      end)
+
+    %{rows: rows} =
       Repo.query!(
         """
-        SELECT count(*)
-        FROM (
-          SELECT logs_fts.rowid
-          FROM logs_fts
-          #{candidate_logs_join(from, to)}
-          WHERE logs_fts MATCH ?#{time_sql}
-          LIMIT ?
-        )
+        SELECT candidates.id
+        FROM (#{union}) AS candidates
+        #{candidate_logs_join(from, to)}
+        WHERE 1#{time_sql}
+        LIMIT ?
         """,
-        [match_query | time_params] ++ [@candidate_cap + 1],
+        List.duplicate(match_query, length(partitions)) ++ time_params ++ [@candidate_cap + 1],
         timeout: 5_000
       )
 
-    count
+    Enum.map(rows, fn [id] -> id end)
   end
 
   defp candidate_logs_join(nil, nil), do: ""
 
   defp candidate_logs_join(_from, _to) do
-    "JOIN logs AS fts_logs ON fts_logs.id = logs_fts.rowid"
+    "JOIN logs AS fts_logs ON fts_logs.id = candidates.id"
   end
 
   defp candidate_time_filter(nil, nil), do: {"", []}

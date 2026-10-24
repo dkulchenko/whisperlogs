@@ -67,33 +67,38 @@ defmodule WhisperLogs.Logs.VolumeRollups do
   end
 
   def reconcile_after_delete!(%DateTime{} = cutoff) do
-    Enum.each([:hour, :day], fn granularity ->
-      start = bucket_start(cutoff, granularity)
-      finish = DateTime.add(start, 1, granularity)
-      name = Atom.to_string(granularity)
+    # Counted before the write transaction: a day bucket holds hundreds of thousands of
+    # logs, and on SQLite the count would otherwise hold the writer lock. New logs land
+    # in the current buckets, so the cutoff's buckets don't change in between.
+    buckets =
+      Enum.map([:hour, :day], fn granularity ->
+        start = bucket_start(cutoff, granularity)
+        finish = DateTime.add(start, 1, granularity)
+        query = where(Log, [l], l.inserted_at >= ^start and l.inserted_at < ^finish)
+        {Atom.to_string(granularity), start, count_and_bytes(query)}
+      end)
 
-      LogVolumeRollup
-      |> where([r], r.granularity == ^name and r.bucket_start < ^start)
-      |> Repo.delete_all()
-
-      query = where(Log, [l], l.inserted_at >= ^start and l.inserted_at < ^finish)
-      {count, bytes} = count_and_bytes(query)
-
-      if count == 0 do
-        LogVolumeRollup
-        |> where([r], r.granularity == ^name and r.bucket_start == ^start)
-        |> Repo.delete_all()
-      else
-        Repo.insert_all(
-          LogVolumeRollup,
-          [rollup_row(name, start, count, bytes)],
-          on_conflict: {:replace, [:log_count, :byte_count]},
-          conflict_target: [:granularity, :bucket_start]
-        )
-      end
-    end)
-
+    {:ok, :ok} = DbAdapter.write_transaction(fn -> Enum.each(buckets, &write_bucket/1) end)
     :ok
+  end
+
+  defp write_bucket({name, start, {count, bytes}}) do
+    LogVolumeRollup
+    |> where([r], r.granularity == ^name and r.bucket_start < ^start)
+    |> Repo.delete_all()
+
+    if count == 0 do
+      LogVolumeRollup
+      |> where([r], r.granularity == ^name and r.bucket_start == ^start)
+      |> Repo.delete_all()
+    else
+      Repo.insert_all(
+        LogVolumeRollup,
+        [rollup_row(name, start, count, bytes)],
+        on_conflict: {:replace, [:log_count, :byte_count]},
+        conflict_target: [:granularity, :bucket_start]
+      )
+    end
   end
 
   def rebuild!(repo \\ Repo) do

@@ -314,7 +314,9 @@ that already has application rows.
 ### SQLite text search index
 
 SQLite installations maintain a contentless FTS5 trigram index for message and metadata substring
-searches. WhisperLogs uses it only for selective searches over broad observed-time windows. Plain
+searches, split into one partition per UTC day. New logs are indexed only into the current day's
+partition, so index maintenance never holds SQLite's writer lock for long, and retention drops a day's
+partition whole once all of its logs are deleted instead of removing index entries one by one. WhisperLogs uses it only for selective searches over broad observed-time windows. Plain
 terms, metadata key/value filters, metadata keys from numeric comparisons, and conservative
 mandatory literals from positive regexes can generate candidates. Narrow windows, common or short
 terms, regexes without a safely required literal, and negative-only searches continue to use the
@@ -324,8 +326,11 @@ search results.
 
 The migration that first creates this index backfills every stored log and blocks ingestion until
 it completes. Plan the first deployment as a maintenance window and keep at least several gigabytes
-of free disk space for the index, migration transaction, and WAL. Subsequent inserts, updates, and
-retention deletes maintain it automatically.
+of free disk space for the index, migration transaction, and WAL. The v0.8.9 migration that splits it
+into daily partitions rebuilds it the same way, one day at a time; ten million logs took about three
+minutes on a development machine with NVMe storage, and the database file grew by the size of the
+existing index. After that, the insert trigger and the daily partition rotation maintain it
+automatically.
 
 ### SQLite incremental vacuum
 

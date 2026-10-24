@@ -86,9 +86,11 @@ SQLite plain terms, quoted phrases, positive metadata filters, and positive rege
 extractable mandatory literals may use a contentless FTS5 trigram candidate index. Metadata numeric
 comparisons use their key as a candidate. Candidate counting and retrieval apply structured
 observed-time bounds before the original predicates recheck every candidate. Narrow windows and
-nonselective, short, unsafe-regex, or negative-only searches retain the ordered scan path. FTS
-maintenance is transactional with log insertion and deletion; the initial backfill migration
-blocks ingestion and requires temporary disk capacity for the index and WAL.
+nonselective, short, unsafe-regex, or negative-only searches retain the ordered scan path. The
+index is partitioned by UTC day: indexing is transactional with log insertion, and retention drops a
+day's partition once all of its logs are deleted. Index entries for deleted logs that remain until
+then are never returned, because every candidate is rechecked against the stored logs. The backfill
+migrations block ingestion and require temporary disk capacity for the index and WAL.
 
 ## Alerts
 

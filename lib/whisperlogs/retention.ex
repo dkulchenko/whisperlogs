@@ -8,12 +8,15 @@ defmodule WhisperLogs.Retention do
   - Alert history older than 90 days
   - Expired user tokens (session: 14 days, magic link: 15 min, email change: 7 days)
   - Expired OAuth credentials and grants revoked for more than 90 days
+
+  On SQLite it also starts each UTC day's search partition, checking every 30 minutes.
   """
   use GenServer
 
   require Logger
 
   alias WhisperLogs.Logs
+  alias WhisperLogs.Logs.SqliteFtsPartitions
   alias WhisperLogs.Alerts
   alias WhisperLogs.Exports
   alias WhisperLogs.Accounts
@@ -25,6 +28,7 @@ defmodule WhisperLogs.Retention do
   @history_retention_days 90
   @cleanup_interval :timer.hours(24)
   @vacuum_interval :timer.minutes(30)
+  @search_rotation_interval :timer.minutes(30)
   @vacuum_min_pages 64
   @vacuum_max_pages 2_048
 
@@ -37,6 +41,7 @@ defmodule WhisperLogs.Retention do
     # Schedule first cleanup shortly after startup
     Process.send_after(self(), :cleanup, :timer.seconds(60))
     schedule_vacuum()
+    if DbAdapter.sqlite?(), do: send(self(), :rotate_search_partition)
     {:ok, %{retention_days: retention_days(), vacuum_warning_logged?: false}}
   end
 
@@ -44,6 +49,12 @@ defmodule WhisperLogs.Retention do
   def handle_info(:cleanup, state) do
     run_cleanup(state.retention_days)
     schedule_cleanup()
+    {:noreply, state}
+  end
+
+  def handle_info(:rotate_search_partition, state) do
+    rotate_search_partition()
+    Process.send_after(self(), :rotate_search_partition, @search_rotation_interval)
     {:noreply, state}
   end
 
@@ -97,6 +108,13 @@ defmodule WhisperLogs.Retention do
   rescue
     error ->
       Logger.error("Retention cleanup failed: #{inspect(error)}")
+  end
+
+  defp rotate_search_partition do
+    SqliteFtsPartitions.rotate(DateTime.utc_now())
+  rescue
+    error ->
+      Logger.error("SQLite search partition rotation failed: #{Exception.message(error)}")
   end
 
   defp schedule_cleanup do

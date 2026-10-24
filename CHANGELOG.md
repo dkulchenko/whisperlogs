@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.8.9 - 2026-10-24
+
+### SQLite retention that no longer blocks ingestion
+
+- The SQLite search index is split into one FTS5 partition per UTC day. New logs are
+  indexed only into the current day's partition, and retention drops a day's partition
+  once all of its logs are deleted. Before, each deleted log left a tombstone in a single
+  index, and FTS5 rewrote large parts of that index inside retention's deletes: on a
+  10-million-log database each 1,000-row delete held SQLite's writer lock for 12 to 26
+  seconds, so retention failed every run and ingestion during it failed with
+  "Database busy".
+- Log ingestion and the volume-rollup update after retention take SQLite's writer lock
+  when their transaction starts. Before, a commit by another writer between the start of
+  the transaction and its first write failed it immediately with "Database busy" instead
+  of waiting.
+- Retention counts the volume rollups for the cutoff's hour and day before its write
+  transaction instead of while holding the writer lock.
+
+### Upgrade notes
+
+- The first startup rebuilds the SQLite search index into daily partitions before
+  accepting logs; a 10-million-log database took about three minutes on a development
+  machine with NVMe storage. The database file grows by about the size of the current
+  index while the old and new indexes coexist (2 GB for 10 million logs), so keep at
+  least that much free disk space. SQLite reuses the freed space afterwards, and
+  incremental vacuum returns it to the filesystem gradually. PostgreSQL installations are
+  unaffected.
+- If retention has been failing, the first cleanup after startup (about a minute in)
+  deletes the whole backlog and then drops the emptied partitions while ingestion
+  continues.
+
 ## v0.8.8 - 2026-10-24
 
 ### Release builds for the v0.8.7 SQLite fixes

@@ -10,6 +10,7 @@ defmodule WhisperLogs.Logs do
   alias WhisperLogs.Accounts.{Scope, User}
   alias WhisperLogs.Logs.Log
   alias WhisperLogs.Logs.SqliteFts
+  alias WhisperLogs.Logs.SqliteFtsPartitions
   alias WhisperLogs.Logs.VolumeRollups
   alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
@@ -31,7 +32,7 @@ defmodule WhisperLogs.Logs do
     with :ok <- validate_batch_size(logs),
          {:ok, entries} <- validate_events(logs, source, observed_at) do
       {:ok, inserted} =
-        Repo.transaction(fn ->
+        DbAdapter.write_transaction(fn ->
           {_count, inserted} =
             Repo.insert_all(Log, entries,
               returning: [
@@ -773,13 +774,15 @@ defmodule WhisperLogs.Logs do
   Deletes in small batches, each in its own transaction, so a large backlog never
   holds SQLite's single writer lock long enough to block ingestion or exceed the
   connection timeout. A failure leaves earlier batches deleted and the volume
-  rollups overcounted until the next successful run reconciles them.
+  rollups overcounted until the next successful run reconciles them. On SQLite it
+  then drops the search partitions whose logs are all gone.
 
   Returns `{count, nil}` where count is the number of deleted logs.
   """
   def delete_before(%DateTime{} = cutoff) do
     count = delete_batches_before(cutoff, 0)
-    {:ok, :ok} = Repo.transaction(fn -> VolumeRollups.reconcile_after_delete!(cutoff) end)
+    :ok = VolumeRollups.reconcile_after_delete!(cutoff)
+    if DbAdapter.sqlite?(), do: SqliteFtsPartitions.drop_emptied()
     {count, nil}
   end
 
