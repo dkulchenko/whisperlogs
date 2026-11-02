@@ -7,12 +7,12 @@
 # This file is based on these images:
 #
 #   - https://hub.docker.com/r/hexpm/elixir/tags - for the build image
-#   - https://hub.docker.com/_/debian/tags?name=trixie-20261005-slim - for the release image
+#   - https://hub.docker.com/_/debian/tags?name=trixie-20261027-slim - for the release image
 #   - https://pkgs.org/ - resource for finding needed packages
-#   - Ex: docker.io/hexpm/elixir:1.20.4-erlang-29.1.2-debian-trixie-20261005-slim
+#   - Ex: docker.io/hexpm/elixir:1.20.5-erlang-29.1.2-debian-trixie-20261027-slim
 #
-ARG BUILDER_IMAGE="docker.io/hexpm/elixir:1.20.4-erlang-29.1.2-debian-trixie-20261005-slim@sha256:c2cc01de71909db898a4d9ee3a379dcf1b1403b292a5b1ff76f4f0e133e75077"
-ARG RUNNER_IMAGE="docker.io/debian:trixie-20261005-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"
+ARG BUILDER_IMAGE="docker.io/hexpm/elixir:1.20.5-erlang-29.1.2-debian-trixie-20261027-slim@sha256:bb266918bb26de22fb02ff19430f47e76331001601df0fc820806c21cd4164e0"
+ARG RUNNER_IMAGE="docker.io/debian:trixie-20261027-slim@sha256:f6b08b09a05725f9431502d3b5714f5c4576e82c1a84fa1debe0c24a7e0c3ec4"
 
 FROM ${BUILDER_IMAGE} AS builder
 

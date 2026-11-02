@@ -1,5 +1,31 @@
 # Changelog
 
+## v0.8.11 - 2026-11-01
+
+### Dependency and base image updates
+
+- Upgrade Bandit to 1.14.1, fixing the advisories reported against 1.13.1, including
+  chunked-body and HTTP/2 memory use, request smuggling through chunk extensions, and
+  quadratic parsing of `Content-Length`.
+- Upgrade the Docker build and standalone binaries to Elixir 1.20.5, which fixes
+  CVE-2026-109821, CVE-2026-115274, and CVE-2026-97209, and the Docker images to the
+  Debian trixie 20261027 base.
+- Upgrade Phoenix to 1.8.16, Phoenix LiveView to 1.2.13, ecto_sqlite3 to 0.26.0,
+  Exqlite to 0.43.0, which bundles SQLite 3.54.1, Swoosh to 1.29.3, and esbuild to 0.10.1.
+- A live tail filter regex that reaches the regex engine's match limit on a long log
+  value counts as no match. Elixir 1.20.5 raises in that case, which would have crashed
+  the log viewer.
+
+### Known issue
+
+- Phoenix.HTML stays at 4.3.0, affected by CVE-2026-117645 (MEDIUM), because 4.4.0 was
+  published less than three days ago. WhisperLogs does not build attribute names from
+  user input.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.10 - 2026-11-01
 
 ### Bad input no longer causes server errors

@@ -363,6 +363,16 @@ defmodule WhisperLogsWeb.LogsLiveTest do
       assert html =~ "Live"
     end
 
+    test "survives a filter regex that reaches the engine's match limit", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, "/?q=" <> URI.encode_www_form("/^(a+)+$/"))
+
+      assert {:ok, _} =
+               Logs.insert_batch("api", [%{"message" => String.duplicate("a", 5000) <> "!"}])
+
+      # A synchronous render proves the view handled the broadcast without crashing.
+      assert render(lv)
+    end
+
     test "receives new logs via PubSub when live tail is on", %{conn: conn} do
       {:ok, lv, _html} = live(conn, ~p"/")
       render_async(lv)

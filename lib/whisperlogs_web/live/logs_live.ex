@@ -1728,6 +1728,13 @@ defmodule WhisperLogsWeb.LogsLive do
     }
   end
 
+  # A user's pattern can reach the regex engine's match limit on a long value.
+  defp regex_matches?(re, value) do
+    Regex.match?(re, value)
+  rescue
+    SystemLimitError -> false
+  end
+
   defp string_param(params, key, default) do
     case params[key] do
       value when is_binary(value) -> value
@@ -1802,8 +1809,8 @@ defmodule WhisperLogsWeb.LogsLive do
   defp log_matches_token?(log, {:regex, pattern}) do
     case Regex.compile(pattern, "i") do
       {:ok, re} ->
-        Regex.match?(re, log.message) or
-          Enum.any?(log.metadata, fn {_k, v} -> Regex.match?(re, stringify_value(v)) end)
+        regex_matches?(re, log.message) or
+          Enum.any?(log.metadata, fn {_k, v} -> regex_matches?(re, stringify_value(v)) end)
 
       {:error, _} ->
         false
