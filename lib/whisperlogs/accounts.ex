@@ -40,7 +40,7 @@ defmodule WhisperLogs.Accounts do
   """
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
-    user = Repo.get_by(User, email: email)
+    user = if storable_text?(email), do: Repo.get_by(User, email: email)
     if User.valid_password?(user, password), do: user
   end
 
@@ -387,16 +387,24 @@ defmodule WhisperLogs.Accounts do
   The active source is queried directly so revocation takes effect immediately.
   """
   def get_source_by_token(key) when is_binary(key) do
-    query =
-      from s in Source,
-        where: s.key == ^key and s.enabled and is_nil(s.revoked_at) and s.type == "http",
-        preload: [:user]
+    if storable_text?(key) do
+      query =
+        from s in Source,
+          where: s.key == ^key and s.enabled and is_nil(s.revoked_at) and s.type == "http",
+          preload: [:user]
 
-    case Repo.one(query) do
-      nil -> {:error, :invalid_key}
-      source -> {:ok, source}
+      case Repo.one(query) do
+        nil -> {:error, :invalid_key}
+        source -> {:ok, source}
+      end
+    else
+      {:error, :invalid_key}
     end
   end
+
+  # Header and form values can hold bytes PostgreSQL refuses as a text parameter, and
+  # such a value cannot match anything stored.
+  defp storable_text?(value), do: String.valid?(value) and not String.contains?(value, <<0>>)
 
   @doc """
   Revokes a source (soft delete).

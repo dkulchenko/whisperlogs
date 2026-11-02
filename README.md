@@ -131,7 +131,7 @@ curl -X POST https://your-whisperlogs-server/api/v1/logs \
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `timestamp` | No | ISO 8601 timestamp (defaults to server time) |
+| `timestamp` | No | RFC 3339 timestamp at any fractional precision, stored in UTC with microseconds (defaults to server time) |
 | `level` | No | Log level: `debug`, `info`, `warning`, `error`; `warn` is stored as `warning`, `notice` as `info`, and `critical`, `alert`, and `emergency` as `error` |
 | `message` | No | Log message text (defaults to an empty string) |
 | `metadata` | No | JSON object with additional data |

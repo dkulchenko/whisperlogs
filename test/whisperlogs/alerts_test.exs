@@ -9,6 +9,49 @@ defmodule WhisperLogs.AlertsTest do
 
   # ===== Alert CRUD Tests =====
 
+  describe "create_alert/2 search query validation" do
+    setup do
+      %{scope: user_scope_fixture(user_fixture())}
+    end
+
+    defp create_with_query(scope, query) do
+      Alerts.create_alert(scope, %{
+        name: "Alert",
+        search_query: query,
+        alert_type: "any_match",
+        cooldown_seconds: 300
+      })
+    end
+
+    test "rejects a regex the database cannot compile", %{scope: scope} do
+      query =
+        if WhisperLogs.DbAdapter.postgres?() do
+          "/(?P<name>a)/"
+        else
+          "/" <> String.duplicate("(", 300) <> "a" <> String.duplicate(")", 300) <> "/"
+        end
+
+      assert {:error, changeset} = create_with_query(scope, query)
+      assert "contains a regex this database cannot run" in errors_on(changeset).search_query
+    end
+
+    test "rejects a query with too many terms", %{scope: scope} do
+      query = Enum.map_join(1..501, " ", fn _ -> "a" end)
+
+      assert {:error, changeset} = create_with_query(scope, query)
+      assert errors_on(changeset).search_query != []
+    end
+
+    @tag :postgres_only
+    test "rejects text PostgreSQL cannot store", %{scope: scope} do
+      assert {:error, nul} = create_with_query(scope, "a\0b")
+      assert "cannot contain NUL characters" in errors_on(nul).search_query
+
+      assert {:error, long} = create_with_query(scope, String.duplicate("a", 256))
+      assert errors_on(long).search_query != []
+    end
+  end
+
   describe "list_alerts/1" do
     test "returns alerts for the given user" do
       user = user_fixture()

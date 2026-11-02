@@ -58,6 +58,23 @@ if WhisperLogs.DbAdapter.sqlite?() do
       assert %{hour: 2, day: 2, week: 2} = Logs.preview_counts("abcd")
     end
 
+    test "FTS candidates honor whole-second MCP time bounds" do
+      assert {:ok, [log]} = Logs.insert_batch("api", [%{"message" => "needle-bounded"}])
+      inserted_at = ~U[2026-08-12 01:00:00.500000Z]
+      Repo.update_all(from(l in Log, where: l.id == ^log.id), set: [inserted_at: inserted_at])
+      force_broad_window()
+
+      scope = WhisperLogs.AccountsFixtures.user_scope_fixture()
+
+      assert {:ok, result} =
+               WhisperLogs.MCP.call(scope, "search_logs", %{
+                 "query" => "needle",
+                 "since" => "2026-08-12T01:00:00Z"
+               })
+
+      assert [%{"message" => "needle-bounded"}] = result["structuredContent"]["logs"]
+    end
+
     test "keeps narrow windows, short terms, and common terms on ordered scans" do
       assert {:ok, [_log]} = Logs.insert_batch("api", [%{"message" => "common-search"}])
       {:ok, common_tokens} = SearchParser.parse("common-search")

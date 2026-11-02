@@ -267,6 +267,26 @@ defmodule WhisperLogs.DbAdapter do
     end
   end
 
+  @doc """
+  Returns whether the database can compile a search regex.
+  """
+  def valid_regex?(pattern) when is_binary(pattern) do
+    result =
+      if sqlite?() do
+        WhisperLogs.Repo.query("SELECT '' REGEXP ?", ["(?i)" <> pattern])
+      else
+        # The savepoint keeps a refused pattern from aborting a surrounding transaction.
+        WhisperLogs.Repo.query("SELECT '' ~* $1", [pattern], mode: :savepoint)
+      end
+
+    case result do
+      {:ok, _result} -> true
+      {:error, %Exqlite.Error{}} -> false
+      {:error, %Postgrex.Error{postgres: %{code: :invalid_regular_expression}}} -> false
+      {:error, error} -> raise error
+    end
+  end
+
   # ===========================================================================
   # Timestamp Truncation (for group_by / select / order_by)
   # ===========================================================================
@@ -457,13 +477,19 @@ defmodule WhisperLogs.DbAdapter do
   # JSON Field Helpers (for runtime key access)
   # ===========================================================================
 
+  # SQLite reads "a.b" as a nested path, but an empty segment is a malformed path that
+  # fails the query once the walk reaches it. Search keys can only be such a literal key.
+  defp sqlite_json_path(key) do
+    if "" in String.split(key, "."), do: ~s($."#{key}"), else: "$.#{key}"
+  end
+
   @doc """
   JSON value extraction for runtime key.
   Returns a dynamic that extracts a value from a JSON field.
   """
   def json_extract_fragment(field_name, key) when is_atom(field_name) do
     if sqlite?() do
-      dynamic([l], fragment("json_extract(?, ?)", field(l, ^field_name), ^"$.#{key}"))
+      dynamic([l], fragment("json_extract(?, ?)", field(l, ^field_name), ^sqlite_json_path(key)))
     else
       dynamic([l], fragment("?->>?", field(l, ^field_name), ^key))
     end
@@ -473,7 +499,7 @@ defmodule WhisperLogs.DbAdapter do
   Case-insensitive LIKE on a JSON extracted value (runtime key).
   """
   def json_ilike_fragment(field_name, key, pattern) when is_atom(field_name) do
-    json_path = "$.#{key}"
+    json_path = sqlite_json_path(key)
 
     if sqlite?() do
       dynamic(
@@ -501,7 +527,7 @@ defmodule WhisperLogs.DbAdapter do
   @canonical_decimal_pattern "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$"
 
   def json_numeric_compare(field_name, key, op, num) when is_atom(field_name) and is_atom(op) do
-    json_path = "$.#{key}"
+    json_path = sqlite_json_path(key)
 
     if sqlite?() do
       sqlite_numeric_compare(field_name, json_path, op, num)
@@ -724,7 +750,10 @@ defmodule WhisperLogs.DbAdapter do
   """
   def json_is_null_fragment(field_name, key) when is_atom(field_name) do
     if sqlite?() do
-      dynamic([l], fragment("json_extract(?, ?) IS NULL", field(l, ^field_name), ^"$.#{key}"))
+      dynamic(
+        [l],
+        fragment("json_extract(?, ?) IS NULL", field(l, ^field_name), ^sqlite_json_path(key))
+      )
     else
       dynamic([l], fragment("?->>? IS NULL", field(l, ^field_name), ^key))
     end
@@ -734,7 +763,7 @@ defmodule WhisperLogs.DbAdapter do
   Exclude metadata ILIKE - matches if key is NULL or value doesn't match pattern.
   """
   def json_not_ilike_fragment(field_name, key, pattern) when is_atom(field_name) do
-    json_path = "$.#{key}"
+    json_path = sqlite_json_path(key)
 
     if sqlite?() do
       dynamic(

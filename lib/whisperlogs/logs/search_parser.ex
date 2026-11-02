@@ -19,6 +19,8 @@ defmodule WhisperLogs.Logs.SearchParser do
   - `source:prod` - filter by source (ILIKE pattern match)
   """
 
+  alias WhisperLogs.Logs.Timestamp
+
   @type operator :: :eq | :gt | :gte | :lt | :lte
 
   @type token ::
@@ -114,6 +116,8 @@ defmodule WhisperLogs.Logs.SearchParser do
   defp classify_tokens(tokens) do
     result =
       tokens
+      # PostgreSQL rejects U+0000 in any parameter, and nothing it stores can contain one.
+      |> Enum.reject(&String.contains?(&1, <<0>>))
       |> Enum.map(&classify_token/1)
       |> Enum.reject(&is_nil/1)
 
@@ -226,16 +230,15 @@ defmodule WhisperLogs.Logs.SearchParser do
 
   # Parse timestamp filter with datetime parsing
   defp parse_timestamp_filter(operator, value, type) do
-    case parse_datetime_value(unquote_value(value)) do
-      {:ok, datetime} ->
-        case type do
-          :metadata -> {:timestamp_filter, operator, datetime}
-          :exclude_metadata -> {:exclude_timestamp_filter, operator, datetime}
-        end
-
-      :error ->
-        # Invalid timestamp - skip this token
-        nil
+    with {:ok, datetime} <- parse_datetime_value(unquote_value(value)),
+         true <- Timestamp.in_range?(datetime) do
+      case type do
+        :metadata -> {:timestamp_filter, operator, datetime}
+        :exclude_metadata -> {:exclude_timestamp_filter, operator, datetime}
+      end
+    else
+      # Invalid timestamp - skip this token
+      _invalid -> nil
     end
   end
 
@@ -309,19 +312,27 @@ defmodule WhisperLogs.Logs.SearchParser do
             {:ok, dt}
 
           _ ->
-            # Fall back to date_time_parser for flexible formats
-            case DateTimeParser.parse_datetime(value) do
-              {:ok, datetime} ->
-                # Ensure we have a DateTime (not NaiveDateTime)
-                case datetime do
-                  %DateTime{} = dt -> {:ok, dt}
-                  %NaiveDateTime{} = ndt -> {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
-                end
-
-              _ ->
-                :error
+            # RFC 3339 forms DateTime rejects: a lowercase "t" or "z", or a leap second
+            case Timestamp.parse(value) do
+              {:ok, dt} -> {:ok, dt}
+              _ -> parse_flexible_datetime(value)
             end
         end
+    end
+  end
+
+  # Fall back to date_time_parser for flexible formats
+  defp parse_flexible_datetime(value) do
+    case DateTimeParser.parse_datetime(value) do
+      {:ok, datetime} ->
+        # Ensure we have a DateTime (not NaiveDateTime)
+        case datetime do
+          %DateTime{} = dt -> {:ok, dt}
+          %NaiveDateTime{} = ndt -> {:ok, DateTime.from_naive!(ndt, "Etc/UTC")}
+        end
+
+      _ ->
+        :error
     end
   end
 

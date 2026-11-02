@@ -8,9 +8,12 @@ defmodule WhisperLogsWeb.UserSessionController do
     create(conn, params, "Welcome back!")
   end
 
-  defp create(conn, %{"user" => user_params}, info) do
-    %{"email" => email, "password" => password} = user_params
-
+  defp create(
+         conn,
+         %{"user" => %{"email" => email, "password" => password} = user_params},
+         info
+       )
+       when is_binary(email) and is_binary(password) do
     if user = Accounts.get_user_by_email_and_password(email, password) do
       conn
       |> put_flash(:info, info)
@@ -22,6 +25,12 @@ defmodule WhisperLogsWeb.UserSessionController do
       |> put_flash(:email, String.slice(email, 0, 160))
       |> redirect(to: ~p"/users/log-in")
     end
+  end
+
+  defp create(conn, _params, _info) do
+    conn
+    |> put_flash(:error, "Invalid email or password")
+    |> redirect(to: ~p"/users/log-in")
   end
 
   def update_password(conn, %{"user" => user_params} = params) do

@@ -48,6 +48,28 @@ defmodule WhisperLogs.Logs.SearchParserTest do
     end
   end
 
+  describe "tokens the database could not run" do
+    test "skips tokens containing NUL characters" do
+      assert SearchParser.parse("\"a\0b\"") == {:ok, []}
+      assert SearchParser.parse("k:\0") == {:ok, []}
+      assert SearchParser.parse("ok \"a\0b\"") == {:ok, [{:term, "ok"}]}
+    end
+
+    test "skips timestamps outside the storable range" do
+      assert SearchParser.parse("timestamp:>-9999-01-01") == {:ok, []}
+      assert SearchParser.parse("timestamp:>-99999999999d") == {:ok, []}
+      assert SearchParser.parse("timestamp:<9999-12-31T23:59:59-23:59") == {:ok, []}
+    end
+
+    test "accepts RFC 3339 forms the ingest path accepts" do
+      assert {:ok, [{:timestamp_filter, :gte, ~U[2016-12-31 23:59:59.999999Z]}]} =
+               SearchParser.parse("timestamp:>=2016-12-31T23:59:60Z")
+
+      assert {:ok, [{:timestamp_filter, :gte, ~U[2026-01-01 00:00:00.000000Z]}]} =
+               SearchParser.parse("timestamp:>=2026-01-01t00:00:00z")
+    end
+  end
+
   describe "timestamp: filter parsing" do
     test "parses timestamp with gt operator and ISO date" do
       {:ok, [{:timestamp_filter, :gt, dt}]} = SearchParser.parse("timestamp:>2025-08-12")

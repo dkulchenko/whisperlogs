@@ -5,6 +5,22 @@ defmodule WhisperLogsWeb.ErrorJSON do
   See config/config.exs.
   """
 
+  # Exceptions raised for a malformed request body, whose message tells the client what to fix.
+  @explained_errors [
+    Plug.BadRequestError,
+    Plug.Parsers.BadEncodingError,
+    Plug.Parsers.ParseError
+  ]
+
+  def render(template, %{reason: %error{} = reason}) when error in @explained_errors do
+    %{
+      errors: %{
+        detail: Phoenix.Controller.status_message_from_template(template),
+        message: reason |> Exception.message() |> String.slice(0, 200)
+      }
+    }
+  end
+
   # If you want to customize a particular status code,
   # you may add your own clauses, such as:
   #

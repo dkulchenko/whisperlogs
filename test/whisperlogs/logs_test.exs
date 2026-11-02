@@ -2,6 +2,7 @@ defmodule WhisperLogs.LogsTest do
   use WhisperLogs.DataCase
 
   alias WhisperLogs.Logs
+  alias WhisperLogs.Logs.Log
 
   describe "search with level filter" do
     setup do
@@ -369,6 +370,73 @@ defmodule WhisperLogs.LogsTest do
                    Logs.insert_batch("api", [%{"request_id" => String.duplicate("x", 20)}])
         end
       )
+    end
+
+    test "stores a valid timestamp of any precision normalized to microseconds" do
+      assert {:ok, [five, none, nine, offset]} =
+               Logs.insert_batch("api", [
+                 %{"timestamp" => "2026-11-02T03:32:37.27493Z"},
+                 %{"timestamp" => "2026-11-02T03:32:37Z"},
+                 %{"timestamp" => "2026-11-02T03:32:37.123456789Z"},
+                 %{"timestamp" => "2026-11-02T03:32:37.5+05:30"}
+               ])
+
+      assert five.timestamp == ~U[2026-11-02 03:32:37.274930Z]
+      assert none.timestamp == ~U[2026-11-02 03:32:37.000000Z]
+      assert nine.timestamp == ~U[2026-11-02 03:32:37.123456Z]
+      assert offset.timestamp == ~U[2026-11-01 22:02:37.500000Z]
+      assert Repo.get!(Log, five.id).timestamp == five.timestamp
+    end
+
+    test "rejects a batch whose timestamp no adapter can store" do
+      for timestamp <- ["-9999-01-01T00:00:00.000000Z", "9999-12-31T23:59:59.000000-23:59"] do
+        assert {:error, %{field: :timestamp, reason: :out_of_range, index: 1}} =
+                 Logs.insert_batch("api", [%{"message" => "ok"}, %{"timestamp" => timestamp}])
+      end
+
+      assert Logs.count_logs() == 0
+    end
+
+    @tag :postgres_only
+    test "rejects NUL characters PostgreSQL cannot store" do
+      for {event, field} <- [
+            {%{"message" => "a\0b"}, :message},
+            {%{"request_id" => "a\0b"}, :request_id},
+            {%{"metadata" => %{"a" => "b\0"}}, :metadata},
+            {%{"metadata" => %{"a\0" => "b"}}, :metadata},
+            {%{"metadata" => %{"a" => [%{"b" => "\0"}]}}, :metadata}
+          ] do
+        assert {:error, %{field: ^field, reason: :contains_nul, index: 0}} =
+                 Logs.insert_batch("api", [event])
+      end
+    end
+
+    if WhisperLogs.DbAdapter.sqlite?() do
+      test "keeps accepting NUL characters on SQLite" do
+        assert {:ok, [log]} =
+                 Logs.insert_batch("api", [
+                   %{"message" => "a\0b", "metadata" => %{"k\0" => "v\0"}, "request_id" => "r\0"}
+                 ])
+
+        stored = Repo.get!(Log, log.id)
+        assert stored.message == "a\0b"
+        assert stored.metadata == %{"k\0" => "v\0", "request_id" => "r\0"}
+      end
+    end
+
+    test "stores RFC 5424 syslog timestamps of any precision" do
+      for {frame, expected} <- [
+            {"<34>1 2003-10-11T22:14:15.003Z host app - - - message",
+             ~U[2003-10-11 22:14:15.003000Z]},
+            {"<34>1 2003-10-11T22:14:15Z host app - - - message",
+             ~U[2003-10-11 22:14:15.000000Z]},
+            {"<34>1 2003-10-11T22:14:15.5+05:30 host app - - - message",
+             ~U[2003-10-11 16:44:15.500000Z]}
+          ] do
+        assert {:ok, event} = WhisperLogs.Syslog.Parser.parse(frame)
+        assert {:ok, [log]} = Logs.insert_batch("syslog", [event])
+        assert log.timestamp == expected
+      end
     end
 
     test "publishes exactly one bounded event after a successful batch" do

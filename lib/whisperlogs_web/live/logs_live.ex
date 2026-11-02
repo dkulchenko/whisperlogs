@@ -1687,7 +1687,7 @@ defmodule WhisperLogsWeb.LogsLive do
         else: "#{time}:00"
 
     with {:ok, naive} <- NaiveDateTime.from_iso8601("#{date}T#{time_with_seconds}"),
-         local_dt <- DateTime.from_naive!(naive, "America/Los_Angeles"),
+         {:ok, local_dt} <- DateTime.from_naive(naive, "America/Los_Angeles"),
          utc_dt <- DateTime.shift_zone!(local_dt, "Etc/UTC") do
       cursor = {utc_dt, 0}
       filters = default_filters() |> Map.put(:time_range, "all")
@@ -1716,15 +1716,23 @@ defmodule WhisperLogsWeb.LogsLive do
       case params["levels"] do
         nil -> defaults.levels
         "" -> []
-        levels_str -> String.split(levels_str, ",")
+        levels_str when is_binary(levels_str) -> String.split(levels_str, ",")
+        _not_a_string -> defaults.levels
       end
 
     %{
-      search: params["q"] || defaults.search,
-      source: params["source"] || defaults.source,
+      search: string_param(params, "q", defaults.search),
+      source: string_param(params, "source", defaults.source),
       levels: levels,
-      time_range: params["t"] || defaults.time_range
+      time_range: string_param(params, "t", defaults.time_range)
     }
+  end
+
+  defp string_param(params, key, default) do
+    case params[key] do
+      value when is_binary(value) -> value
+      _missing_or_not_a_string -> default
+    end
   end
 
   defp filters_to_params(filters) do

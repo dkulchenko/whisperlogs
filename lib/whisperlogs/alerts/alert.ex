@@ -5,7 +5,8 @@ defmodule WhisperLogs.Alerts.Alert do
   use Ecto.Schema
   import Ecto.Changeset
 
-  alias WhisperLogs.Logs.SearchParser
+  alias WhisperLogs.DbAdapter
+  alias WhisperLogs.Logs
 
   @alert_types ~w(any_match velocity)
   @velocity_windows [60, 300, 900, 3600]
@@ -48,6 +49,7 @@ defmodule WhisperLogs.Alerts.Alert do
     ])
     |> validate_required([:name, :search_query, :alert_type, :cooldown_seconds])
     |> validate_length(:name, min: 1, max: 100)
+    |> validate_postgres_text_lengths()
     |> validate_inclusion(:alert_type, @alert_types)
     |> validate_search_query()
     |> validate_velocity_settings()
@@ -67,21 +69,36 @@ defmodule WhisperLogs.Alerts.Alert do
     ])
   end
 
+  # These columns are varchar(255) on PostgreSQL and unbounded on SQLite.
+  defp validate_postgres_text_lengths(changeset) do
+    if DbAdapter.postgres?() do
+      changeset
+      |> validate_length(:description, max: 255)
+      |> validate_length(:search_query, max: 255)
+    else
+      changeset
+    end
+  end
+
   defp validate_search_query(changeset) do
     case get_change(changeset, :search_query) do
       nil ->
         changeset
 
       query ->
-        # SearchParser.parse always returns {:ok, tokens}
-        # We validate that the query produces at least one token
-        case SearchParser.parse(query) do
-          {:ok, []} ->
-            # Empty tokens means the query was whitespace-only
-            changeset
+        if DbAdapter.postgres?() and String.contains?(query, <<0>>) do
+          add_error(changeset, :search_query, "cannot contain NUL characters")
+        else
+          case Logs.validate_search_query(query) do
+            :ok ->
+              changeset
 
-          {:ok, _tokens} ->
-            changeset
+            {:error, :query_too_complex} ->
+              add_error(changeset, :search_query, "has too many terms")
+
+            {:error, :invalid_query} ->
+              add_error(changeset, :search_query, "contains a regex this database cannot run")
+          end
         end
     end
   end

@@ -67,6 +67,17 @@ defmodule WhisperLogsWeb.McpControllerTest do
     assert json_response(conn, 403)["error"]["message"] == "Invalid Origin"
   end
 
+  test "rejects non-object request metadata", %{conn: conn} do
+    user = user_fixture()
+    %{credentials: credentials} = oauth_credentials_fixture(user)
+
+    for meta <- ["text", 1, [], true, nil] do
+      body = request("server/discover", %{}) |> put_in(["params", "_meta"], meta)
+      response = mcp_post(conn, body, credentials["access_token"])
+      assert json_response(response, 400)["error"]["code"] == -32_600
+    end
+  end
+
   test "allows only POST on the MCP endpoint", %{conn: conn} do
     conn = get(conn, "/mcp")
     assert json_response(conn, 405)["error"]["code"] == -32_601

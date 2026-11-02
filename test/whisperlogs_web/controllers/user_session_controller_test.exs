@@ -11,6 +11,21 @@ defmodule WhisperLogsWeb.UserSessionControllerTest do
   end
 
   describe "POST /users/log-in - email and password" do
+    test "treats malformed credentials as a failed login", %{conn: conn} do
+      for user_params <- [
+            "text",
+            %{},
+            %{"email" => ["a"], "password" => "x"},
+            %{"email" => "a@example.com", "password" => %{"a" => "b"}},
+            %{"email" => "a\0@example.com", "password" => "x"}
+          ] do
+        response = post(conn, ~p"/users/log-in", %{"user" => user_params})
+
+        assert redirected_to(response) == ~p"/users/log-in"
+        assert Phoenix.Flash.get(response.assigns.flash, :error) == "Invalid email or password"
+      end
+    end
+
     test "logs the user in", %{conn: conn, user: user} do
       conn =
         post(conn, ~p"/users/log-in", %{

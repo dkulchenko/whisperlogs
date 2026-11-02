@@ -1,5 +1,44 @@
 # Changelog
 
+## v0.8.10 - 2026-11-01
+
+### Bad input no longer causes server errors
+
+- `POST /api/v1/logs` accepts valid timestamps at any fractional precision and stores them
+  in UTC with microseconds. Before, any timestamp without exactly six or more fractional
+  digits, including one with no fraction at all, returned a 500. One such event failed its
+  whole batch, so a client retrying that batch stayed stuck. RFC 5424 syslog messages hit
+  the same error and were dropped.
+- RFC 3339 forms that were wrongly refused are accepted: a lowercase `t` or `z`, and leap
+  seconds, which are stored as the last microsecond of 23:59:59 UTC.
+- These now return a 4xx instead of a 500: timestamps outside the storable range
+  (`out_of_range`), NUL characters on PostgreSQL (`contains_nul`), multipart uploads in
+  place of log fields, and API keys holding bytes the database refuses.
+- Malformed request bodies return a 400 that says what is wrong, and clients that accept
+  any content type receive it as JSON.
+- MCP `search_logs` reports these as tool errors instead of failing the request: regexes
+  the database cannot compile, NUL characters, out-of-range `timestamp:`, `since`, and
+  `until` values, and queries with more than 500 terms. Non-object `_meta` returns a 400.
+- SQLite search no longer fails on numeric filters beyond the range of a double, such as
+  `duration:>1e999`, or on metadata keys with empty path segments, such as `.:x`.
+- SQLite full-text search no longer drops logs from the first second of a `since` bound
+  written without six fractional digits.
+- Alerts reject queries the database cannot run, and on PostgreSQL also NUL characters
+  and queries or descriptions over 255 characters, with a form error.
+- Malformed login parameters are a failed login. Non-string log viewer URL parameters are
+  ignored. A blank manual export date or a scroll-to-time that falls in a daylight saving
+  change shows a message instead of crashing the page.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+- Timestamps earlier than `-4713-11-24T00:00:00Z` (previously accepted on SQLite) or that
+  fall after year 9999 in UTC (previously accepted on PostgreSQL) are now rejected.
+- PostgreSQL search queries with more than 500 terms are now rejected.
+- SQLite still stores NUL characters, so such logs still cannot be migrated to PostgreSQL.
+- An MCP cursor issued by an earlier version for a search using `since` or `until` is
+  rejected once; start that search again.
+
 ## v0.8.9 - 2026-10-24
 
 ### SQLite retention that no longer blocks ingestion

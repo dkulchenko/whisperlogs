@@ -139,6 +139,23 @@ defmodule WhisperLogsWeb.ExportsLiveTest do
       assert html =~ "To Date"
     end
 
+    test "asks for dates when the export form is submitted without them", %{
+      conn: conn,
+      scope: scope
+    } do
+      dest = local_destination_fixture(scope, name: "Export Target")
+      {:ok, lv, _html} = live(conn, ~p"/exports")
+
+      html =
+        render_click(lv, "run_export", %{
+          "destination_id" => to_string(dest.id),
+          "from_date" => "",
+          "to_date" => ""
+        })
+
+      assert html =~ "Choose a start and end date"
+    end
+
     test "hides export modal", %{conn: conn, scope: scope} do
       dest = local_destination_fixture(scope)
 

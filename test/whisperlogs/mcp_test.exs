@@ -158,6 +158,69 @@ defmodule WhisperLogs.MCPTest do
     assert invalid_datetime["isError"]
   end
 
+  test "applies time bounds of any precision to observed time" do
+    scope = user_fixture() |> Scope.for_user()
+    log = log_fixture("api", message: "bounded")
+    second = DateTime.truncate(log.inserted_at, :second)
+    since = DateTime.to_iso8601(second)
+    until = second |> DateTime.add(2, :second) |> DateTime.to_iso8601()
+
+    assert {:ok, result} = MCP.call(scope, "search_logs", %{"since" => since, "until" => until})
+    assert [%{"message" => "bounded"}] = result["structuredContent"]["logs"]
+  end
+
+  test "reports unstorable time bounds as tool errors" do
+    scope = user_fixture() |> Scope.for_user()
+
+    for bound <- ["-9999-01-01T00:00:00Z", "9999-12-31T23:59:59-23:59"], key <- ~w(since until) do
+      assert {:ok, %{"isError" => true}} = MCP.call(scope, "search_logs", %{key => bound})
+    end
+  end
+
+  test "reports queries the database would refuse as tool errors, never exceptions" do
+    scope = user_fixture() |> Scope.for_user()
+    log_fixture("api", message: "present", metadata: %{"n" => 5})
+
+    for query <- [
+          "\"a\0b\"",
+          "k:\0",
+          "/a\0b/",
+          "source:a\0",
+          "timestamp:>-9999-01-01",
+          "timestamp:>-99999999999d",
+          Enum.map_join(1..501, " ", fn _ -> "ab" end)
+        ] do
+      assert {:ok, %{"isError" => true}} = MCP.call(scope, "search_logs", %{"query" => query})
+    end
+  end
+
+  test "runs numeric filters beyond the range of a double" do
+    scope = user_fixture() |> Scope.for_user()
+    log_fixture("api", message: "numeric", metadata: %{"n" => 5})
+
+    for {query, count} <- [
+          {"n:>1e999", 0},
+          {"n:<1e999", 1},
+          {"n:>-1e999", 1},
+          {"n:>1e-999", 1},
+          {"-n:>1e999", 1}
+        ] do
+      assert {:ok, result} = MCP.call(scope, "search_logs", %{"query" => query})
+      refute result["isError"]
+      assert length(result["structuredContent"]["logs"]) == count, query
+    end
+  end
+
+  test "treats metadata keys with empty path segments as literal keys" do
+    scope = user_fixture() |> Scope.for_user()
+    log_fixture("api", message: "nested", metadata: %{"n" => %{"x" => 1}, "a" => 1})
+
+    for query <- [".:x", ".a:x", "..:x", "n.:x", "n..x:y", "n.:>1", "-.:x", "-n.:>1"] do
+      assert {:ok, result} = MCP.call(scope, "search_logs", %{"query" => query})
+      refute result["isError"]
+    end
+  end
+
   test "describes structured time fields and concrete query examples" do
     assert %{"tools" => [%{"inputSchema" => schema, "description" => description}]} =
              MCP.tools_result()
@@ -187,6 +250,24 @@ defmodule WhisperLogs.MCPTest do
       collect_mcp_pages(scope, query, ids, content["next_cursor"])
     else
       {ids, content["next_cursor"]}
+    end
+  end
+
+  test "reports regexes the database cannot compile as tool errors" do
+    scope = user_fixture() |> Scope.for_user()
+    log_fixture("api", message: "present")
+
+    # Valid PCRE that PostgreSQL's regex dialect refuses, and nesting beyond SQLite's PCRE limit.
+    query =
+      if WhisperLogs.DbAdapter.postgres?() do
+        "/(?P<name>a)/"
+      else
+        "/" <> String.duplicate("(", 300) <> "a" <> String.duplicate(")", 300) <> "/"
+      end
+
+    for query <- [query, "-" <> query] do
+      assert {:ok, %{"isError" => true}} = MCP.call(scope, "search_logs", %{"query" => query})
+      assert %{hour: 0, day: 0, week: 0} = WhisperLogs.Logs.preview_counts(query)
     end
   end
 end

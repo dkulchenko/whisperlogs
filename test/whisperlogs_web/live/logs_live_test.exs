@@ -16,6 +16,12 @@ defmodule WhisperLogsWeb.LogsLiveTest do
     {:ok, conn: log_in_user(conn, user), user: user, scope: scope}
   end
 
+  test "renders with malformed filter parameters", %{conn: conn} do
+    for query <- ["levels[]=x", "levels[a]=b", "q[a]=b", "source[]=x", "t[]=x", "q=a%00b"] do
+      assert html_response(get(conn, "/?" <> query), 200)
+    end
+  end
+
   defp ensure_local_user do
     import Ecto.Query
 

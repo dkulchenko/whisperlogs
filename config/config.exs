@@ -84,7 +84,8 @@ config :whisperlogs, WhisperLogsWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: WhisperLogsWeb.ErrorHTML, json: WhisperLogsWeb.ErrorJSON],
+    # API clients that accept anything get JSON; browsers ask for HTML by name.
+    formats: [json: WhisperLogsWeb.ErrorJSON, html: WhisperLogsWeb.ErrorHTML],
     layout: false
   ],
   pubsub_server: WhisperLogs.PubSub,

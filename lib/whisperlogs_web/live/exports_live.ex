@@ -699,26 +699,29 @@ defmodule WhisperLogsWeb.ExportsLive do
         {:noreply, put_flash(socket, :error, "Destination not found")}
 
       dest ->
-        from_date = Date.from_iso8601!(params["from_date"])
-        to_date = Date.from_iso8601!(params["to_date"])
+        with {:ok, from_date} <- Date.from_iso8601(params["from_date"]),
+             {:ok, to_date} <- Date.from_iso8601(params["to_date"]) do
+          from_timestamp = DateTime.new!(from_date, ~T[00:00:00], "Etc/UTC")
+          to_timestamp = DateTime.new!(Date.add(to_date, 1), ~T[00:00:00], "Etc/UTC")
 
-        from_timestamp = DateTime.new!(from_date, ~T[00:00:00], "Etc/UTC")
-        to_timestamp = DateTime.new!(Date.add(to_date, 1), ~T[00:00:00], "Etc/UTC")
+          case Exports.create_manual_job(scope, dest.id, %{
+                 from_timestamp: from_timestamp,
+                 to_timestamp: to_timestamp
+               }) do
+            {:ok, job} ->
+              {:noreply,
+               socket
+               |> assign(:show_export_modal, false)
+               |> assign(:selected_destination, nil)
+               |> assign(:jobs, [job | socket.assigns.jobs])
+               |> put_flash(:info, "Export started. Refresh the page to see progress.")}
 
-        case Exports.create_manual_job(scope, dest.id, %{
-               from_timestamp: from_timestamp,
-               to_timestamp: to_timestamp
-             }) do
-          {:ok, job} ->
-            {:noreply,
-             socket
-             |> assign(:show_export_modal, false)
-             |> assign(:selected_destination, nil)
-             |> assign(:jobs, [job | socket.assigns.jobs])
-             |> put_flash(:info, "Export started. Refresh the page to see progress.")}
-
-          {:error, reason} ->
-            {:noreply, put_flash(socket, :error, format_export_error(reason))}
+            {:error, reason} ->
+              {:noreply, put_flash(socket, :error, format_export_error(reason))}
+          end
+        else
+          {:error, _reason} ->
+            {:noreply, put_flash(socket, :error, "Choose a start and end date")}
         end
     end
   end

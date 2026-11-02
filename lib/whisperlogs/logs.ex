@@ -14,12 +14,17 @@ defmodule WhisperLogs.Logs do
   alias WhisperLogs.Logs.VolumeRollups
   alias WhisperLogs.Logs.SavedSearch
   alias WhisperLogs.Logs.SearchParser
+  alias WhisperLogs.Logs.Timestamp
 
   @pubsub WhisperLogs.PubSub
   @topic "logs"
   @delete_batch_size 1_000
   # Waiting SQLite writers retry the lock with backoff; a pause between batches lets them in.
   @delete_batch_pause_ms 50
+  # SQLite's expression depth limit of 1000 is reached at under 1,000 ANDed search tokens.
+  @max_search_tokens 500
+  @max_double Decimal.new("1.7976931348623157e308")
+  @min_double Decimal.new("2.2250738585072014e-308")
 
   @doc """
   Inserts a batch of logs for a given source.
@@ -109,9 +114,8 @@ defmodule WhisperLogs.Logs do
   defp event_timestamp(nil, observed_at), do: {:ok, observed_at}
 
   defp event_timestamp(timestamp, _observed_at) when is_binary(timestamp) do
-    case DateTime.from_iso8601(timestamp) do
-      {:ok, datetime, _offset} -> {:ok, DateTime.truncate(datetime, :microsecond)}
-      _error -> {:error, %{field: :timestamp, reason: :invalid_rfc3339}}
+    with {:error, reason} <- Timestamp.parse(timestamp) do
+      {:error, %{field: :timestamp, reason: reason}}
     end
   end
 
@@ -138,6 +142,9 @@ defmodule WhisperLogs.Logs do
       not String.valid?(message) ->
         {:error, %{field: :message, reason: :invalid_utf8}}
 
+      unstorable_nul?(message) ->
+        {:error, %{field: :message, reason: :contains_nul}}
+
       byte_size(message) > limits.max_message_bytes ->
         {:error, %{field: :message, reason: :too_large}}
 
@@ -163,6 +170,12 @@ defmodule WhisperLogs.Logs do
       is_binary(request_id) and not String.valid?(request_id) ->
         {:error, %{field: :request_id, reason: :invalid_utf8}}
 
+      unstorable_nul?(request_id) ->
+        {:error, %{field: :request_id, reason: :contains_nul}}
+
+      unstorable_nul?(metadata) ->
+        {:error, %{field: :metadata, reason: :contains_nul}}
+
       true ->
         metadata = if request_id, do: Map.put(metadata, "request_id", request_id), else: metadata
 
@@ -172,6 +185,18 @@ defmodule WhisperLogs.Logs do
         end
     end
   end
+
+  # PostgreSQL text and jsonb cannot hold U+0000. SQLite can, and keeps accepting it.
+  defp unstorable_nul?(value), do: DbAdapter.postgres?() and contains_nul?(value)
+
+  defp contains_nul?(value) when is_binary(value), do: String.contains?(value, <<0>>)
+  defp contains_nul?(value) when is_list(value), do: Enum.any?(value, &contains_nul?/1)
+
+  defp contains_nul?(value) when is_map(value) do
+    Enum.any?(value, fn {key, item} -> contains_nul?(key) or contains_nul?(item) end)
+  end
+
+  defp contains_nul?(_value), do: false
 
   defp validate_depth(value, max_depth) do
     if json_depth(value) <= max_depth do
@@ -194,11 +219,16 @@ defmodule WhisperLogs.Logs do
   defp json_depth(_value), do: 0
 
   defp encoded_limit(value, max_bytes, field) do
-    size = value |> Jason.encode_to_iodata!() |> IO.iodata_length()
+    # Form and multipart bodies can carry values JSON has no form for, such as uploads.
+    case Jason.encode_to_iodata(value) do
+      {:ok, encoded} ->
+        if IO.iodata_length(encoded) <= max_bytes,
+          do: :ok,
+          else: {:error, %{field: field, reason: :too_large}}
 
-    if size <= max_bytes,
-      do: :ok,
-      else: {:error, %{field: field, reason: :too_large}}
+      {:error, _reason} ->
+        {:error, %{field: field, reason: :invalid_type}}
+    end
   end
 
   @doc """
@@ -282,26 +312,54 @@ defmodule WhisperLogs.Logs do
         {:error, :invalid_time_range}
 
       true ->
-        case SearchParser.parse(search) do
-          {:ok, []} when trimmed != "" ->
-            {:error, :invalid_query}
+        with {:ok, tokens} <- SearchParser.parse(search),
+             :ok <- require_tokens(tokens, trimmed),
+             :ok <- validate_search_tokens(tokens) do
+          query =
+            Log
+            |> maybe_before(before)
+            |> filter_observed_time_range(since, until)
+            |> order_by([l], desc: l.inserted_at, desc: l.id)
+            |> apply_search_tokens_hybrid(tokens, since, until)
+            |> limit(^(limit + 1))
 
-          {:ok, tokens} ->
-            query =
-              Log
-              |> maybe_before(before)
-              |> filter_observed_time_range(since, until)
-              |> order_by([l], desc: l.inserted_at, desc: l.id)
-              |> apply_search_tokens_hybrid(tokens, since, until)
-              |> limit(^(limit + 1))
-
-            logs = Repo.all(query, timeout: limits.query_timeout_ms)
-            {:ok, %{logs: Enum.take(logs, limit), has_more: length(logs) > limit}}
+          logs = Repo.all(query, timeout: limits.query_timeout_ms)
+          {:ok, %{logs: Enum.take(logs, limit), has_more: length(logs) > limit}}
         end
     end
   end
 
   def search_logs(_scope, _search, _opts), do: {:error, :unauthorized}
+
+  defp require_tokens([], trimmed) when trimmed != "", do: {:error, :invalid_query}
+  defp require_tokens(_tokens, _trimmed), do: :ok
+
+  @doc """
+  Checks that the database can run a search query the parser accepted.
+
+  The parser compiles regexes as PCRE, but PostgreSQL has its own regex dialect and
+  SQLite's PCRE build has lower limits, so only the database can say whether it accepts one.
+  """
+  def validate_search_query(search) when is_binary(search) do
+    {:ok, tokens} = SearchParser.parse(search)
+    validate_search_tokens(tokens)
+  end
+
+  defp validate_search_tokens(tokens) when length(tokens) > @max_search_tokens,
+    do: {:error, :query_too_complex}
+
+  defp validate_search_tokens(tokens) do
+    regexes_valid? =
+      tokens
+      |> Enum.flat_map(fn
+        {type, pattern} when type in [:regex, :exclude_regex] -> [pattern]
+        _token -> []
+      end)
+      |> Enum.uniq()
+      |> Enum.all?(&DbAdapter.valid_regex?/1)
+
+    if regexes_valid?, do: :ok, else: {:error, :invalid_query}
+  end
 
   defp maybe_before(query, nil), do: query
 
@@ -484,15 +542,14 @@ defmodule WhisperLogs.Logs do
   def count_matches(search_query, window_seconds) when is_binary(search_query) do
     cutoff = DateTime.add(DateTime.utc_now(), -window_seconds, :second)
 
-    case SearchParser.parse(search_query) do
-      {:ok, []} ->
-        0
-
-      {:ok, tokens} ->
-        Log
-        |> where([l], l.inserted_at >= ^cutoff)
-        |> apply_search_tokens_hybrid(tokens, cutoff, nil)
-        |> Repo.aggregate(:count, :id)
+    with {:ok, [_ | _] = tokens} <- SearchParser.parse(search_query),
+         :ok <- validate_search_tokens(tokens) do
+      Log
+      |> where([l], l.inserted_at >= ^cutoff)
+      |> apply_search_tokens_hybrid(tokens, cutoff, nil)
+      |> Repo.aggregate(:count, :id)
+    else
+      _ -> 0
     end
   end
 
@@ -505,23 +562,22 @@ defmodule WhisperLogs.Logs do
     day = DateTime.add(now, -86_400, :second)
     week = DateTime.add(now, -604_800, :second)
 
-    case SearchParser.parse(search_query) do
-      {:ok, [_ | _] = tokens} ->
-        {hour_count, day_count, week_count} =
-          Log
-          |> where([l], l.inserted_at >= ^week)
-          |> apply_search_tokens_hybrid(tokens, week, nil)
-          |> select([l], {
-            fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^hour),
-            fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^day),
-            count(l.id)
-          })
-          |> Repo.one(timeout: WhisperLogs.Config.alert_limits().query_timeout_ms)
+    with {:ok, [_ | _] = tokens} <- SearchParser.parse(search_query),
+         :ok <- validate_search_tokens(tokens) do
+      {hour_count, day_count, week_count} =
+        Log
+        |> where([l], l.inserted_at >= ^week)
+        |> apply_search_tokens_hybrid(tokens, week, nil)
+        |> select([l], {
+          fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^hour),
+          fragment("SUM(CASE WHEN ? >= ? THEN 1 ELSE 0 END)", l.inserted_at, ^day),
+          count(l.id)
+        })
+        |> Repo.one(timeout: WhisperLogs.Config.alert_limits().query_timeout_ms)
 
-        %{hour: hour_count || 0, day: day_count || 0, week: week_count || 0}
-
-      _ ->
-        %{hour: 0, day: 0, week: 0}
+      %{hour: hour_count || 0, day: day_count || 0, week: week_count || 0}
+    else
+      _ -> %{hour: 0, day: 0, week: 0}
     end
   end
 
@@ -819,7 +875,7 @@ defmodule WhisperLogs.Logs do
          Regex.match?(~r/^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$/, value) do
       case Decimal.parse(value) do
         {decimal, ""} ->
-          num = if DbAdapter.sqlite?(), do: Decimal.to_float(decimal), else: decimal
+          num = if DbAdapter.sqlite?(), do: clamped_float(decimal), else: decimal
           {:ok, num}
 
         _error ->
@@ -831,6 +887,17 @@ defmodule WhisperLogs.Logs do
   end
 
   defp parse_numeric(_), do: :error
+
+  # SQLite compares REALs, and Decimal.to_float/1 raises outside the normal double range.
+  # The nearest double keeps comparisons with any stored value correct.
+  defp clamped_float(decimal) do
+    cond do
+      Decimal.gt?(decimal, @max_double) -> 1.7976931348623157e308
+      Decimal.lt?(decimal, Decimal.negate(@max_double)) -> -1.7976931348623157e308
+      Decimal.lt?(Decimal.abs(decimal), @min_double) -> 0.0
+      true -> Decimal.to_float(decimal)
+    end
+  end
 
   # === Saved Searches ===
 

@@ -5,6 +5,7 @@ defmodule WhisperLogs.MCP do
 
   alias WhisperLogs.Accounts.Scope
   alias WhisperLogs.Logs
+  alias WhisperLogs.Logs.Timestamp
 
   @protocol_version "2026-07-28"
   @cursor_salt "mcp-log-cursor-v1"
@@ -264,9 +265,9 @@ defmodule WhisperLogs.MCP do
         {:ok, nil}
 
       value when is_binary(value) ->
-        case DateTime.from_iso8601(value) do
-          {:ok, datetime, _offset} -> {:ok, DateTime.truncate(datetime, :microsecond)}
-          _ -> {:error, :invalid_datetime}
+        case Timestamp.parse(value) do
+          {:ok, datetime} -> {:ok, datetime}
+          {:error, _reason} -> {:error, :invalid_datetime}
         end
 
       _ ->
@@ -309,14 +310,32 @@ defmodule WhisperLogs.MCP do
   defp tool_error(reason) do
     message =
       case reason do
-        :invalid_query -> "The query does not contain a valid WhisperLogs search expression."
-        :query_too_large -> "The query exceeds the configured size limit."
-        :invalid_limit -> "limit must be an integer from 1 through 100."
-        :invalid_cursor -> "The cursor is invalid, expired, or belongs to another search."
-        :query_timeout -> "The log search timed out. Narrow the query and try again."
-        :invalid_datetime -> "since and until must be RFC 3339 timestamps."
-        :invalid_time_range -> "since must be earlier than until."
-        _ -> "Invalid search_logs arguments."
+        :invalid_query ->
+          "The query does not contain a valid WhisperLogs search expression."
+
+        :query_too_large ->
+          "The query exceeds the configured size limit."
+
+        :query_too_complex ->
+          "The query has too many terms. Remove some and try again."
+
+        :invalid_limit ->
+          "limit must be an integer from 1 through 100."
+
+        :invalid_cursor ->
+          "The cursor is invalid, expired, or belongs to another search."
+
+        :query_timeout ->
+          "The log search timed out. Narrow the query and try again."
+
+        :invalid_datetime ->
+          "since and until must be RFC 3339 timestamps no later than year 9999."
+
+        :invalid_time_range ->
+          "since must be earlier than until."
+
+        _ ->
+          "Invalid search_logs arguments."
       end
 
     %{

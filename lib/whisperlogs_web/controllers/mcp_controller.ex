@@ -81,11 +81,10 @@ defmodule WhisperLogsWeb.McpController do
 
   defp validate_protocol(conn, body) do
     header_version = single_header(conn, "mcp-protocol-version")
-    meta_version = get_in(body, ["params", "_meta", "io.modelcontextprotocol/protocolVersion"])
-    client_info = get_in(body, ["params", "_meta", "io.modelcontextprotocol/clientInfo"])
-
-    client_capabilities =
-      get_in(body, ["params", "_meta", "io.modelcontextprotocol/clientCapabilities"])
+    meta = request_meta(body)
+    meta_version = Map.get(meta, "io.modelcontextprotocol/protocolVersion")
+    client_info = Map.get(meta, "io.modelcontextprotocol/clientInfo")
+    client_capabilities = Map.get(meta, "io.modelcontextprotocol/clientCapabilities")
 
     cond do
       not valid_client_info?(client_info) or not is_map(client_capabilities) ->
@@ -101,6 +100,9 @@ defmodule WhisperLogsWeb.McpController do
         :ok
     end
   end
+
+  defp request_meta(%{"params" => %{"_meta" => %{} = meta}}), do: meta
+  defp request_meta(_body), do: %{}
 
   defp valid_client_info?(%{"name" => name, "version" => version})
        when is_binary(name) and name != "" and is_binary(version) and version != "",
