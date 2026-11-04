@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.12 - 2026-11-04
+
+### Security updates
+
+- Upgrade Ecto to 3.14.3, which fixes CVE-2026-118391 (HIGH): queries with interpolated
+  JSON paths, `splice/1`, or `constant/1` filled the query cache without limit.
+  WhisperLogs does not use those constructs, so it was not exposed; the release ships
+  ahead of the usual three-day wait because the advisory is rated High.
+- Upgrade Phoenix.HTML to 4.4.0, which fixes CVE-2026-117645 (MEDIUM), the attribute
+  injection noted as a known issue in v0.8.11.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.11 - 2026-11-01
 
 ### Dependency and base image updates
