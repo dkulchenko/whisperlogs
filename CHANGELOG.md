@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.8.13 - 2026-11-05
+
+### Security updates
+
+- Rebuild the Docker image on Debian trixie-20261104, which ships apt 3.0.4 and fixes
+  CVE-2026-109518 (HIGH) in `apt` and `libapt-pkg7.0`.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.12 - 2026-11-04
 
 ### Security updates
