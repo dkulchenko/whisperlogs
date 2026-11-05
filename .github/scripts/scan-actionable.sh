@@ -133,4 +133,6 @@ fi
 if [ "$actionable" = 0 ] && [ "$failed" = 0 ]; then
   echo "Nothing to act on." >> "$summary"
 fi
+# The API doesn't serve step summaries; repeat it in the log so gh can read it.
+[ "$summary" = /dev/stdout ] || cat "$summary"
 exit $((actionable || failed))
