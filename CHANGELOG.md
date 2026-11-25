@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.15 - 2026-11-24
+
+### Standalone binaries
+
+- Publish the standalone binaries that v0.8.14 is missing, with all of its security
+  updates. Its build stopped before compiling because GitHub's `ubuntu-latest` runner
+  moved to Ubuntu 26, which the BEAM setup step does not recognize, so binary builds run
+  on Ubuntu 24.04 again.
+- Build the standalone binaries' assets with Node.js 26.13.1, a Node.js security release.
+  Node.js is used only at build time and does not ship in the binaries.
+
+### Known issue
+
+- The standalone binaries stay on Erlang/OTP 29.1 because Burrito publishes no newer
+  prebuilt runtime. They are not exposed to the OTP advisories fixed in the v0.8.14
+  Docker image: WhisperLogs decodes no untrusted Erlang terms and runs neither inets
+  `httpd` nor SNMP.
+
+### Upgrade notes
+
+- The Docker image is unchanged from v0.8.14 apart from its version number.
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.14 - 2026-11-24
 
 ### Security updates

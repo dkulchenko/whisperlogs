@@ -14,7 +14,7 @@ concurrency:
 jobs:
   build-and-attach:
     name: Build Burrito and Upload Assets
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       MIX_ENV: prod
 
@@ -34,7 +34,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: "26.13.0"
+          node-version: "26.13.1"
           cache: npm
           cache-dependency-path: assets/package-lock.json
 
