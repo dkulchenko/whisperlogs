@@ -1,5 +1,45 @@
 # Changelog
 
+## v0.8.14 - 2026-11-24
+
+### Security updates
+
+- Build the Docker image on Erlang/OTP 29.1.3, which fixes CVE-2026-116293 (HIGH), a VM
+  abort in `binary_to_term`, CVE-2026-116382 (HIGH) in the inets `httpd` ESI handler, and
+  CVE-2026-116225 (HIGH) in the SNMP decoder. WhisperLogs decodes no untrusted Erlang
+  terms and runs neither inets `httpd` nor SNMP, so it was not exposed.
+- Rebuild the Docker image on Debian trixie-20261123, which fixes CVE-2026-19499 (HIGH)
+  and CVE-2026-5435 (HIGH) in glibc and CVE-2026-85091 (HIGH) in zlib.
+- Upgrade db_connection to 2.10.3 for CVE-2026-133555 (HIGH), code execution through a
+  forged `DBConnection.Stream` struct. It needs an application that decodes untrusted
+  Erlang terms, which WhisperLogs does not do.
+- Upgrade Phoenix to 1.8.17, which fixes CVE-2026-129344 (HIGH) and CVE-2026-128361
+  (HIGH). WhisperLogs makes no binary broadcasts and does not use Presence, so it was not
+  exposed.
+- Upgrade Phoenix LiveView to 1.2.15, which fixes CVE-2026-126334 (MEDIUM): a hand-crafted
+  WebSocket join without a URL skipped the `live_session` `on_mount` hooks, including
+  the one that requires a signed-in user.
+- Upgrade Plug to 1.20.4, which fixes CVE-2026-120287 (MEDIUM) in multipart length
+  accounting, and Bandit to 1.15.0, which fixes GHSA-j9wq-h5xx-5qx5 (MEDIUM), costly
+  logging of HTTP/2 trailers.
+
+The OTP, Debian, and db_connection releases are less than three days old. They ship
+ahead of the usual wait because their advisories are rated High.
+
+### Dependency updates
+
+- Upgrade Swoosh to 1.30.0 and Finch to 0.25.0.
+
+### Known issue
+
+- The standalone binaries stay on Erlang/OTP 29.1 because Burrito publishes no newer
+  prebuilt runtime. They are not exposed to the OTP advisories above for the same
+  reasons as the Docker image.
+
+### Upgrade notes
+
+- No database migration, configuration change, or manual maintenance is required.
+
 ## v0.8.13 - 2026-11-05
 
 ### Security updates
